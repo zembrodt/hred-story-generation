@@ -127,7 +127,7 @@ class BeamSearchResult:
 # Represents a Sequence to Sequence network made up of an encoder RNN and decoder RNN with attention weights
 class Hred(object):
     def __init__(self, book, max_length, hidden_size, embedding_size, 
-            groups=None,      # qa data in groups
+            #groups=None,      # qa data in groups
             encoder_file=None,
             decoder_file=None,
             context_file=None,
@@ -149,7 +149,7 @@ class Hred(object):
         self.context = None
 
         # New parameters
-        self.groups = groups
+        #self.groups = groups
         self.encoder_file = encoder_file
         self.decoder_file = decoder_file
         self.context_file = context_file
@@ -413,7 +413,7 @@ class Hred(object):
     #
     # Then we call "train" many times and occasionally print the progress (%
     # of examples, time so far, estimated time) and average loss.
-    def train_model(self, epochs,#train_paragraphs, epochs, validation_size=0.1, validate_every=10, 
+    def train_model(self, train_paragraphs, epochs, # validation_size=0.1, validate_every=10, 
             embedding_type=None, save_temp_models=False, checkpoint_every=25, loss_dir=None,
             print_every=1000, plot_every=100, evaluate_every=500):
         global CHECKPOINT_DIR
@@ -471,9 +471,10 @@ class Hred(object):
 
         loss_avgs = []
         validation_loss_avgs = []
-
+        """
         # If we didn't load the encoder/decoder from files: create new ones or load checkpoint to train
-        if self.encoder is None or self.decoder is None:
+        if self.encoder is None or self.decoder is None or self.context is None:
+            '''
             if start_epoch > 0:
                 # Load the encoder/decoder for the starting epoch checkpoint
                 encoder_filename = ENCODER_FILE_FORMAT.format(CHECKPOINT_DIR, start_epoch, self.embedding_size, self.hidden_size, self.max_length)
@@ -520,9 +521,12 @@ class Hred(object):
                             for item in validation_loss_avgs:
                                 f.write('{},{}\t'.format(item[0], item[1]))
             else:
-                self.encoder = encoder.EncoderRNN(self.book.n_words, self.hidden_size, self.embedding_size).to(self.device)
-                self.decoder = decoder.DecoderRNN(self.book.n_words, self.hidden_size, self.embedding_size, self.max_length).to(self.device)
+            '''
+            self.encoder = EncoderRNN(self.book.n_words, self.hidden_size, self.embedding_size)#.to(self.device)
+            self.decoder = DecoderRNN(self.book.n_words, self.hidden_size, self.embedding_size, self.max_length)#.to(self.device)
+            self.context = ContextRNN(self.book.n_words, self.hidden_size)
 
+        """
         # Create the GloVe embedding's weight matrix:
         if embedding_type is not None:
             # Generates a dict of a word to its GloVe vector
@@ -586,7 +590,7 @@ class Hred(object):
         iter = 0
         for i in range(epochs):
             self.log.debug(logfile, 'Processing epoch {}'.format(i))
-            training_group = variablesFromGroup(self.book, random.choice(self.groups))
+            #training_group = variablesFromGroup(self.book, random.choice(self.groups))
 
             context_hidden = self.context.initHidden()
             context_optimizer.zero_grad()
@@ -594,12 +598,12 @@ class Hred(object):
             decoder_optimizer.zero_grad()
 
             loss_avg = 0
-            for j in range(0, len(training_group)-1):
+            for j in range(0, len(train_paragraphs)-1):
                 iter += 1
-                input_variable = training_group[j]
-                target_variable = training_group[j+1]
+                input_variable = train_paragraphs[j]
+                target_variable = train_paragraphs[j+1]
                 last = False
-                if j+1 == len(training_group)-1:
+                if j+1 == len(train_paragraphs)-1:
                     last = True
 
                 if last:
