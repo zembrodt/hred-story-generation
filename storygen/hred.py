@@ -22,6 +22,7 @@ USE_CUDA = torch.cuda.is_available()
 # Filename format: obj{_embedding-type}/{encoder or decoder}_{epoch-size}_{embedding-size}_{hidden-size}_{max-length}.torch
 ENCODER_FILE_FORMAT = '{}/encoder_{}_{}_{}_{}.torch'
 DECODER_FILE_FORMAT = '{}/decoder_{}_{}_{}_{}.torch'
+CONTEXT_FILE_FORMAT = '{}/context_{}_{}_{}_{}.torch'
 
 CHECKPOINT_FORMAT = '{}_(\d+)_{}_{}_{}.torch'
 CHECKPOINT_DIR = 'obj'
@@ -203,54 +204,74 @@ class Hred(object):
         """
 
     ## ORIGINAL loading func
-    """
-    def loadFromFiles(self, encoder_filename, decoder_filename, learning_rate=0.01):
+    
+    def loadFromFiles(self, encoder_filename, decoder_filename, context_filename, learning_rate=0.01):
         # Check that the path for both files exists
         os.makedirs(os.path.dirname(encoder_filename), exist_ok=True)
         os.makedirs(os.path.dirname(decoder_filename), exist_ok=True)
+        os.makedirs(os.path.dirname(context_filename), exist_ok=True)
         
         encoder_file = Path(encoder_filename)
         decoder_file = Path(decoder_filename)
+        context_file = Path(context_filename)
 
-        if encoder_file.is_file() and decoder_file.is_file():
-            print("Loading encoder and decoder from files...")
+        if encoder_file.is_file() and decoder_file.is_file() and context_file.is_file():
+            print("Loading encoder and decoder and context from files...")
             # TODO: modify this to save encoder/decoder into a single state
-            encoder_checkpoint = torch.load(encoder_file, map_location=self.device)
-            decoder_checkpoint = torch.load(decoder_file, map_location=self.device)
+            encoder_checkpoint = torch.load(encoder_file)
+            decoder_checkpoint = torch.load(decoder_file)
+            context_checkpoint = torch.load(context_file)
 
-            self.encoder = encoder.EncoderRNN(self.book.n_words, self.hidden_size, self.embedding_size).to(self.device)
+            self.encoder = EncoderRNN(self.book.n_words, self.hidden_size, self.embedding_size)
             self.encoder.load_state_dict(encoder_checkpoint[STATE_DICT])
-            self.encoder_optimizer = optim.SGD(self.encoder.parameters(), lr=learning_rate)
-            self.encoder_optimizer.load_state_dict(encoder_checkpoint[OPTIMIZER])
+            #self.encoder.load_state_dict(torch.load(self.encoder_file))
+            #self.encoder_optimizer = optim.SGD(self.encoder.parameters(), lr=learning_rate)
+            #self.encoder_optimizer.load_state_dict(encoder_checkpoint[OPTIMIZER])
             
-            self.decoder = decoder.DecoderRNN(self.book.n_words, self.hidden_size, self.embedding_size, self.max_length).to(self.device)
+            self.decoder = DecoderRNN(self.book.n_words, self.hidden_size, self.embedding_size, self.max_length)
             self.decoder.load_state_dict(decoder_checkpoint[STATE_DICT])
-            self.decoder_optimizer = optim.SGD(self.decoder.parameters(), lr=learning_rate)
-            self.decoder_optimizer.load_state_dict(decoder_checkpoint[OPTIMIZER])
+            #self.decoder_optimizer = optim.SGD(self.decoder.parameters(), lr=learning_rate)
+            #self.decoder_optimizer.load_state_dict(decoder_checkpoint[OPTIMIZER])
+
+            self.context = ContextRNN(self.hidden_size, self.book.n_words)
+            self.context.load_state_dict(context_checkpoint[STATE_DICT])
+
+            if USE_CUDA:
+                self.encoder = self.encoder.cuda()
+                self.decoder = self.decoder.cuda()
+                self.context = self.context.cuda()
 
             return True
         return False
 
-    def saveToFiles(self, encoder_filename, decoder_filename):
+    def saveToFiles(self, encoder_filename, decoder_filename, context_filename):
         # Check that the path for both files exists
         os.makedirs(os.path.dirname(encoder_filename), exist_ok=True)
         os.makedirs(os.path.dirname(decoder_filename), exist_ok=True)
-
+        os.makedirs(os.path.dirname(context_filename), exist_ok=True)
+        
         encoder_file = Path(encoder_filename)
         decoder_file = Path(decoder_filename)
+        context_file = Path(context_filename)
 
         encoder_state = {
             STATE_DICT: self.encoder.state_dict(),
-            OPTIMIZER: self.encoder_optimizer.state_dict()
+            #OPTIMIZER: self.encoder_optimizer.state_dict()
         }
         decoder_state = {
             STATE_DICT: self.decoder.state_dict(),
-            OPTIMIZER: self.decoder_optimizer.state_dict()
+            #OPTIMIZER: self.decoder_optimizer.state_dict()
+        }
+
+        context_state = {
+            STATE_DICT: self.context.state_dict(),
+            #OPTIMIZER: self.decoder_optimizer.state_dict()
         }
 
         torch.save(encoder_state, encoder_file)
         torch.save(decoder_state, decoder_file)
-    """
+        torch.save(context_state, context_file)
+    
     def _train(self, input_variable, target_variable, 
             #context_hidden, encoder_optimizer, decoder_optimizer,
             context_input, encoder_optimizer, decoder_optimizer,
@@ -365,8 +386,7 @@ class Hred(object):
         #return loss.item() / target_length
     
     # Calculates loss value without updating weights. Used for validation
-    # TODO: may need to re-add in the future
-    """
+    # TODO: update with new context encoder
     def _calculate_loss(self, input_tensor, target_tensor, teacher_forcing_ratio=0.5):
         # Make all copies
         start = time.time()
@@ -436,7 +456,7 @@ class Hred(object):
         decoder_optimizer_copy.step()
     
         return loss.item() / target_length
-    """
+    
 
     ######################################################################
     # The whole training process looks like this:
@@ -448,13 +468,13 @@ class Hred(object):
     #
     # Then we call "train" many times and occasionally print the progress (%
     # of examples, time so far, estimated time) and average loss.
-    def train_model(self, train_paragraphs, epochs, # validation_size=0.1, validate_every=10, 
+    def train_model(self, epochs, train_paragraphs, validation_paragraphs, # validation_size=0.1, validate_every=10, 
             embedding_type=None, save_temp_models=False, checkpoint_every=25, loss_dir=None,
             print_every=1000, plot_every=100, evaluate_every=500):
         global CHECKPOINT_DIR
         logfile = self.log.create('seq2seq-train-model')
         # TODO: re-add checkpoints and embeddings
-        """
+        
         # Set folder for checkpoints
         if embedding_type is not None:
             if embedding_type == 'glove':
@@ -473,6 +493,7 @@ class Hred(object):
         # Check if any checkpoints for this model exist:
         encoders = set()
         decoders = set()
+        context = set()
 
         for filename in os.listdir('{}/'.format(CHECKPOINT_DIR)):
             r_enc = re.search(CHECKPOINT_FORMAT.format('encoder', self.embedding_size, self.hidden_size, self.max_length), filename)
@@ -482,8 +503,10 @@ class Hred(object):
                 r_dec = re.search(CHECKPOINT_FORMAT.format('decoder', self.embedding_size, self.hidden_size, self.max_length), filename)
                 if r_dec:
                     decoders.add(int(r_dec.group(1)))
+                else:
+                    r_con = re.search(CHECKPOINT_FORMAT.format('context', self.embedding_size, self.hidden_size, self.max_length), filename)
         # A checkpoint needs a valid encoder and decoder 
-        checkpoints = encoders.intersection(decoders)
+        checkpoints = encoders.intersection(decoders).intersection(context)
         print('Checkpoints found at: {}'.format(checkpoints))
         self.log.debug(logfile, 'Checkpoints found at: {}'.format(checkpoints))
         start_epoch = 0
@@ -506,15 +529,16 @@ class Hred(object):
 
         loss_avgs = []
         validation_loss_avgs = []
-        """
+        
         # If we didn't load the encoder/decoder from files: create new ones or load checkpoint to train
         if self.encoder is None or self.decoder is None or self.context is None:
-            '''
+            
             if start_epoch > 0:
                 # Load the encoder/decoder for the starting epoch checkpoint
                 encoder_filename = ENCODER_FILE_FORMAT.format(CHECKPOINT_DIR, start_epoch, self.embedding_size, self.hidden_size, self.max_length)
                 decoder_filename = DECODER_FILE_FORMAT.format(CHECKPOINT_DIR, start_epoch, self.embedding_size, self.hidden_size, self.max_length)
-                if self.loadFromFiles(encoder_filename, decoder_filename):
+                context_filename = CONTEXT_FILE_FORMAT.format(CHECKPOINT_DIR, start_epoch, self.embedding_size, self.hidden_size, self.max_length)
+                if self.loadFromFiles(encoder_filename, decoder_filename, context_filename):
                     self.log.info(logfile, 'Loaded encoder/decoder from files at checkpoint {}'.format(start_epoch))
                 else:
                     self.log.error(logfile, 'Tried to load checkpoint encoder/decoder at epoch={}, but it failed!'.format(start_epoch))
@@ -556,12 +580,11 @@ class Hred(object):
                             for item in validation_loss_avgs:
                                 f.write('{},{}\t'.format(item[0], item[1]))
             else:
-            '''
-            self.encoder = EncoderRNN(self.book.n_words, self.hidden_size, self.embedding_size)#.to(self.device)
-            self.decoder = DecoderRNN(self.book.n_words, self.hidden_size, self.embedding_size, self.max_length)#.to(self.device)
-            self.context = ContextRNN(self.book.n_words, self.hidden_size)
+                self.encoder = EncoderRNN(self.book.n_words, self.hidden_size, self.embedding_size)#.to(self.device)
+                self.decoder = DecoderRNN(self.book.n_words, self.hidden_size, self.embedding_size, self.max_length)#.to(self.device)
+                self.context = ContextRNN(self.book.n_words, self.hidden_size)
 
-        """
+        
         # Create the GloVe embedding's weight matrix:
         if embedding_type is not None:
             # Generates a dict of a word to its GloVe vector
@@ -584,8 +607,9 @@ class Hred(object):
             # Set the embedding layer's state_dict for encoder and decoder
             self.encoder.embedding.load_state_dict({'weight': weights_matrix})
             self.decoder.embedding.load_state_dict({'weight': weights_matrix})
+            self.context.embedding.load_state_dict({'weight': weights_matrix})
             self.log.info(logfile, 'Created encoder and decoder embeddings')
-        """
+        
         start = time.time()
         print_loss_total = 0  # Reset every print_every
 
@@ -601,20 +625,17 @@ class Hred(object):
         
         criterion = nn.NLLLoss()
 
-        #TODO: add?
+        # NOTE: train/validation paragraphs data calculated in main file
         #training_paragraphs = [variableFromPair(train_pair, self.book) for train_pair in train_paragraphs]
         
         # Create the validation set
-        #TODO: add later
-        """
-        if validation_size > 1:
-            self.log.error(logfile, 'Validation size must be less than 1, given={}'.format(validation_size))
-            print('The validation size must be less than 1 (percentage of the training set)')
-            exit(1)
+        #if validation_size > 1:
+        #    self.log.error(logfile, 'Validation size must be less than 1, given={}'.format(validation_size))
+        #    print('The validation size must be less than 1 (percentage of the training set)')
+        #    exit(1)
         # This should use the same pairs if same train_pairs is passed
-        validation_pairs = training_paragraphs[:int(len(training_paragraphs)*validation_size)]
-        """
-        #TODO: see above
+        #validation_pairs = train_paragraphs[:int(len(training_paragraphs)*validation_size)]
+        
         #random.shuffle(training_paragraphs) # shuffle the train pairs
         
         
@@ -694,39 +715,43 @@ class Hred(object):
 
             # Calculate loss on validation set:
             #TODO: re-add validation
-            """
+            
             if i > 0 and i % validate_every == 0:
                 validation_loss_avg = 0
-                for j, pair in enumerate(validation_pairs):
+                for j, pair in enumerate(validation_paragraphs):
                     input_tensor = pair[0]
                     target_tensor = pair[1]
                     validation_loss_avg += self._calculate_loss(input_tensor, target_tensor)
                 # Save validation loss value
-                validation_loss_avg /= len(validation_pairs)
+                validation_loss_avg /= len(validation_paragraphs)
                 validation_loss_avgs.append((i, validation_loss_avg))
                 with open(VALIDATION_LOSS_FILE_FORMAT.format(self.log.dir), 'a+') as f:
                     f.write('{},{}\t'.format(i, validation_loss_avg))
-            """
+            
             # TODO: re-add checkpointing
-            """
+            
             # Save a checkpoint
             if save_temp_models:
                 encoder_filename = ENCODER_FILE_FORMAT.format(CHECKPOINT_DIR, i+1, self.embedding_size, self.hidden_size, self.max_length)
                 decoder_filename = DECODER_FILE_FORMAT.format(CHECKPOINT_DIR, i+1, self.embedding_size, self.hidden_size, self.max_length)
+                context_filename = CONTEXT_FILE_FORMAT.format(CHECKPOINT_DIR, i+1, self.embedding_size, self.hidden_size, self.max_length)
                 encoder_file = Path(encoder_filename)
                 decoder_file = Path(decoder_filename)
+                context_file = Path(context_filename)
                 # Save model at current epoch if doesn't exist
-                if not encoder_file.is_file() or not decoder_file.is_file():
+                if not encoder_file.is_file() or not decoder_file.is_file() or not context_file.is_file():
                     self.log.debug(logfile, 'Saving temporary model at epoch={}'.format(i))
-                    self.saveToFiles(encoder_filename, decoder_filename)
+                    self.saveToFiles(encoder_filename, decoder_filename, context_filename)
                 # Delete second previous model if not a multiple of 10
                 if i > 1 and (i-1) % checkpoint_every != 0:
                     # Delete model with epoch = i-1
                     encoder_file = Path(ENCODER_FILE_FORMAT.format(CHECKPOINT_DIR, i-1, self.embedding_size, self.hidden_size, self.max_length))
                     decoder_file = Path(DECODER_FILE_FORMAT.format(CHECKPOINT_DIR, i-1, self.embedding_size, self.hidden_size, self.max_length))
-                    if encoder_file.is_file() and decoder_file.is_file():
+                    context_file = Path(CONTEXT_FILE_FORMAT.format(CHECKPOINT_DIR, i-1, self.embedding_size, self.hidden_size, self.max_length))
+                    if encoder_file.is_file() and decoder_file.is_file() and context_file.is_file():
                         encoder_file.unlink()
                         decoder_file.unlink()
+                        context_file.unlink()
                         self.log.debug(logfile, 'Deleted temporary model at epoch={}'.format(i-1))
                     else:
                         self.log.error(logfile, 'Could not find temporary model at epoch={}'.format(i-1))
@@ -752,7 +777,7 @@ class Hred(object):
         plt.xlabel('Epoch')
         plt.ylabel('Loss')
         plt.savefig('{}loss_figure.png'.format(self.log.dir)) # Save plot to log folder
-        """
+        
 
     ######################################################################
     # Evaluation
