@@ -45,7 +45,7 @@ class DecoderRNN(nn.Module):
         self.gru = nn.GRU(self.embedding_size, self.hidden_size)
         self.out = nn.Linear(self.hidden_size, self.output_size)
 
-    def forward(self, input, hidden, encoder_output, encoder_outputs, context):
+    def forward(self, input, hidden, encoder_outputs, context):
         #print(f'input: {input}')
         #print(f'self.embedding: {self.embedding}')
         #print(f'self.embedding(input).view(1, 1, -1): {self.embedding(input).view(1, 1, -1)}')

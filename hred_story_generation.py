@@ -21,9 +21,17 @@ def get_book(book_title, paragraphs):
 
 if __name__=='__main__':
     # prepare data
-    paragraphs = []
+    train_paragraphs, test_paragraphs, validation_paragraphs = [], [], []
     with open('data/train_raw.pkl', 'rb') as f:
-        paragraphs = pickle.load(f)
+        train_paragraphs = pickle.load(f)
+    '''
+    with open('data/validate_raw.pkl', 'rb') as f:
+        train_paragraphs = pickle.load(f)
+    with open('data/test_raw.pkl', 'rb') as f:
+        train_paragraphs = pickle.load(f)
+    '''
+
+    paragraphs = train_paragraphs + test_paragraphs + validation_paragraphs
 
     MAX_LENGTH = max(
         max(map(len, [sentence for sentence in paragraph]))
@@ -36,7 +44,7 @@ if __name__=='__main__':
     book = get_book(book_title, paragraphs)    
 
     print('Creating HRED')
-    hred = Hred(groups=paragraphs,
+    hred = Hred(#groups=paragraphs,
             hidden_size=HIDDEN_SIZE,
             max_length=MAX_LENGTH,
             embedding_size=EMBEDDING_SIZE,
@@ -49,4 +57,4 @@ if __name__=='__main__':
     epochs = 10
 
     print(f'Training for {epochs} epochs')
-    hred.train_model(epochs)
+    hred.train_model(train_paragraphs, epochs)
