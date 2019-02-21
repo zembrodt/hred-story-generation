@@ -57,4 +57,4 @@ if __name__=='__main__':
     epochs = 10
 
     print(f'Training for {epochs} epochs')
-    hred.train_model(train_paragraphs, epochs)
+    hred.train_model(epochs, train_paragraphs, validation_paragraphs)
