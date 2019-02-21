@@ -272,10 +272,119 @@ class Hred(object):
         torch.save(decoder_state, decoder_file)
         torch.save(context_state, context_file)
     
-    def _train(self, paragraph,# target_variable, 
-            #context_hidden, encoder_optimizer, decoder_optimizer,
-            context_input, encoder_optimizer, decoder_optimizer, context_optimizer,
-            criterion):#, last):
+    def _train(self, input_variable, target_variable,
+            encoder_model, decoder_model, context_model,
+            context_input, 
+            encoder_optimizer, decoder_optimizer, #context_optimizer,
+            criterion, last):
+        
+        encoder_hidden = encoder_model.initHidden()
+
+        #encoder_optimizer.zero_grad()
+        #decoder_optimizer.zero_grad()
+
+        input_length = input_variable.size()[0]
+        target_length = target_variable.size()[0]
+
+        encoder_outputs = Variable(torch.zeros(self.max_length, encoder_model.hidden_size))
+        if USE_CUDA:
+            encoder_outputs = encoder_outputs.cuda()
+
+        # TODO: What is the point of calculating this if it's only returned on 'last'? There must be a different way
+        loss = 0
+
+        # Encode the input sentence
+        for ei in range(input_length):
+            if ei < self.max_length:
+                encoder_output, encoder_hidden = encoder_model(input_variable[ei], encoder_hidden)
+                encoder_outputs[ei] = encoder_output[0][0]
+            else:
+                print(f'Somehow we got ei={ei} for range({input_length}) where max_length={self.max_length}')
+
+        # The "sentence vector" is the hidden state obtained after the last token of the sentence has been processed
+        sentence_vector = encoder_hidden
+        # The Context RNN keeps track of past sentences by processing iteratively each sentence vector
+        context_output, context_hidden = context_model(context_input, sentence_vector)
+        # After processing sentence S_n, the hidden state of the context RNN represents a summary of the sentences up to and
+            # including sentence n, which is used to predict the next sentence S_n+1
+        # This hidden state can be interpreted as the continuous-valued state of the dialogue system
+        # See context_hidden, context_output will be given as input to next sentence
+
+        # The next sentence prediction is performed by means of a decoder RNN
+        # Takes the hidden state of the context RNN and produces a probability distribution over the tokens in the next sentence
+        # Its prediction is conditioned on the hidden state of the context RNN
+        decoder_input = Variable(torch.LongTensor([[START_ID]]))
+        if USE_CUDA:
+            decoder_input = decoder_input.cuda()
+        #print(f'decoder_input: {decoder_input}')
+
+        #decoder_hidden = encoder_hidden # NOTE: I don't think we have any direct interaction between the encoder and decoder
+
+        # Calculate context
+        #context_output, context_hidden = context_model(encoder_output, context_hidden) # NOTE: already calculated
+        # It doesn't seem that the encoder output is used for anything, rather its hidden state is sent to context RNN
+
+        decoder_hidden = decoder_model.initHidden()
+
+        use_teacher_forcing = True if random.random() < self.teacher_forcing_ratio else False
+
+        if use_teacher_forcing:
+            # Teacher forcing: Feed the target as the next input
+            for di in range(target_length):
+                decoder_output, decoder_hidden, decoder_attention = decoder_model(
+                    decoder_input, decoder_hidden, encoder_outputs, context_hidden)
+                
+                if last:
+                    #loss += criterion(decoder_output[0], target_variable[di]) #NOTE: this is how it is in other project?
+                    loss += criterion(decoder_output, target_variable[di]) # previous project
+                    #print(f'decoder_output: {decoder_output}\ntarget_variable[{di}]: {target_variable[di]}')
+                decoder_input = target_variable[di]  # Teacher forcing
+
+        else:
+            # Without teacher forcing: use its own predictions as the next input
+            for di in range(target_length):
+                decoder_output, decoder_hidden, decoder_attention = decoder_model(
+                    decoder_input, decoder_hidden, encoder_outputs, context_hidden)
+                topv, topi = decoder_output.topk(1)
+
+                # from hred project:
+                #ni = topi[0][0] 
+                #decoder_input = Variable(torch.LongTensor([[ni]]))
+
+                # from seq2seq project, .detach() is NECESSARY for loss.backward() (?)
+                decoder_input = topi.squeeze().detach() # detach from history as input
+                #print(f'dec_inp before Variable: {decoder_input}')
+                decoder_input = Variable(decoder_input)
+                #print(f'dec_inp after Variable: {decoder_input}')
+
+                if USE_CUDA:
+                    decoder_input = decoder_input.cuda()
+
+                if last:
+                    #loss += criterion(decoder_output[0], target_variable[di]) #NOTE: this is how it is in other project?
+                    loss += criterion(decoder_output, target_variable[di]) # previous project
+                    #print(f'decoder_output: {decoder_output}')
+                    #print(f'target_variable[{di}]: {target_variable[di]}')
+                #if ni == STOP_ID:
+                if decoder_input.item() == STOP_ID:
+                    break
+
+        if last:
+            # NOTE: moved outside of loop
+            loss.backward()
+            # NOTE: We need to detach the "hidden state" between "batches"?
+            # Trying:
+            context_hidden = context_hidden.detach()
+            
+            return loss.data.item() / target_length, context_hidden
+        else:
+            return context_hidden
+
+    def _train_paragraph(self, paragraph,
+            encoder_model, decoder_model, context_model,
+            context_hidden, 
+            encoder_optimizer, decoder_optimizer, context_optimizer,
+            criterion):
         
         variables = variablesFromParagraph(self.book, paragraph)
 
@@ -286,143 +395,22 @@ class Hred(object):
             if i+1 == len(variables)-1:
                 last = True
             if last:
-                #loss, context_hidden = self._train(input_variable, target_variable, 
-                #    context_hidden, encoder_optimizer, decoder_optimizer, criterion, last)
-                ## NOTE: old _train method
-                encoder_hidden = self.encoder.initHidden()
+                loss, context_hidden = self._train(input_variable, target_variable, encoder_model, decoder_model, context_model,
+                        context_hidden, encoder_optimizer, decoder_optimizer, criterion, last)
 
-                #encoder_optimizer.zero_grad()
-                #decoder_optimizer.zero_grad()
+                encoder_optimizer.step()
+                decoder_optimizer.step()
+                context_optimizer.step()
 
-                input_length = input_variable.size()[0]
-                target_length = target_variable.size()[0]
+                return loss, context_hidden
+            else:
+                context_hidden = self._train(input_variable, target_variable, encoder_model, decoder_model, context_model,
+                        context_hidden, encoder_optimizer, decoder_optimizer, criterion, last)
+        print('We reached a part of training that should be unreachable! Empty paragraph perhaps?')
+        print(f'Paragraph: {paragraph}')
+        exit(1)
 
-                encoder_outputs = Variable(torch.zeros(self.max_length, self.encoder.hidden_size))
-                if USE_CUDA:
-                    encoder_outputs = encoder_outputs.cuda()
-
-                # TODO: What is the point of calculating this if it's only returned on 'last'? There must be a different way
-                loss = 0
-
-                # Encode the input sentence
-                for ei in range(input_length):
-                    if ei < self.max_length:
-                        encoder_output, encoder_hidden = self.encoder(input_variable[ei], encoder_hidden)
-                        encoder_outputs[ei] = encoder_output[0][0]
-                    else:
-                        print(f'Somehow we got ei={ei} for range({input_length}) where max_length={self.max_length}')
-
-                # The "sentence vector" is the hidden state obtained after the last token of the sentence has been processed
-                sentence_vector = encoder_hidden
-                # The Context RNN keeps track of past sentences by processing iteratively each sentence vector
-                context_output, context_hidden = self.context(context_input, sentence_vector)
-                # After processing sentence S_n, the hidden state of the context RNN represents a summary of the sentences up to and
-                    # including sentence n, which is used to predict the next sentence S_n+1
-                # This hidden state can be interpreted as the continuous-valued state of the dialogue system
-                # See context_hidden, context_output will be given as input to next sentence
-
-                # The next sentence prediction is performed by means of a decoder RNN
-                # Takes the hidden state of the context RNN and produces a probability distribution over the tokens in the next sentence
-                # Its prediction is conditioned on the hidden state of the context RNN
-                decoder_input = Variable(torch.LongTensor([[START_ID]]))
-                if USE_CUDA:
-                    decoder_input = decoder_input.cuda()
-                #print(f'decoder_input: {decoder_input}')
-
-                #decoder_hidden = encoder_hidden # NOTE: I don't think we have any direct interaction between the encoder and decoder
-
-                # Calculate context
-                #context_output, context_hidden = self.context(encoder_output, context_hidden) # NOTE: already calculated
-                # It doesn't seem that the encoder output is used for anything, rather its hidden state is sent to context RNN
-
-                decoder_hidden = self.decoder.initHidden()
-
-                use_teacher_forcing = True if random.random() < self.teacher_forcing_ratio else False
-
-                if use_teacher_forcing:
-                    # Teacher forcing: Feed the target as the next input
-                    for di in range(target_length):
-                        decoder_output, decoder_hidden, decoder_attention = self.decoder(
-                            decoder_input, decoder_hidden, encoder_outputs, context_hidden)
-                        
-                        if last:
-                            #loss += criterion(decoder_output[0], target_variable[di]) #NOTE: this is how it is in other project?
-                            loss += criterion(decoder_output, target_variable[di]) # previous project
-                            #print(f'decoder_output: {decoder_output}\ntarget_variable[{di}]: {target_variable[di]}')
-                        decoder_input = target_variable[di]  # Teacher forcing
-
-                else:
-                    # Without teacher forcing: use its own predictions as the next input
-                    for di in range(target_length):
-                        decoder_output, decoder_hidden, decoder_attention = self.decoder(
-                            decoder_input, decoder_hidden, encoder_outputs, context_hidden)
-                        topv, topi = decoder_output.topk(1)
-
-                        # from hred project:
-                        #ni = topi[0][0] 
-                        #decoder_input = Variable(torch.LongTensor([[ni]]))
-
-                        # from seq2seq project, .detach() is NECESSARY for loss.backward() (?)
-                        decoder_input = topi.squeeze().detach() # detach from history as input
-                        #print(f'dec_inp before Variable: {decoder_input}')
-                        decoder_input = Variable(decoder_input)
-                        #print(f'dec_inp after Variable: {decoder_input}')
-
-                        if USE_CUDA:
-                            decoder_input = decoder_input.cuda()
-
-                        if last:
-                            #loss += criterion(decoder_output[0], target_variable[di]) #NOTE: this is how it is in other project?
-                            loss += criterion(decoder_output, target_variable[di]) # previous project
-                            #print(f'decoder_output: {decoder_output}')
-                            #print(f'target_variable[{di}]: {target_variable[di]}')
-                        #if ni == STOP_ID:
-                        if decoder_input.item() == STOP_ID:
-                            break
-
-                if last:
-                    # NOTE: moved outside of loop
-                    #loss.backward()
-                    # NOTE: We need to detach the "hidden state" between "batches"?
-                    # Trying:
-                    #context_hidden = context_hidden.detach()
-                #else:
-                #    loss.backward(retain_graph=True)
-
-                #encoder_optimizer.step()
-                #decoder_optimizer.step()
-
-                #if last:
-                #    return loss.data.item() / target_length, context_hidden
-                #else:
-                #    return context_hidden
-                #return loss.item() / target_length
-                ## end old _train
-                #print(f'train_model: loss: {loss}')
-
-                #loss_avg += loss
-                #print_loss_total += loss
-                #plot_loss_total += loss
-
-            loss.backward()
-            # NOTE: We need to detach the "hidden state" between "batches"?
-            # Trying:
-            context_hidden = context_hidden.detach()
-
-            encoder_optimizer.step()
-            decoder_optimizer.step()
-            context_optimizer.step()
-            #else:
-            #    context_hidden = self._train(input_variable, target_variable,
-            #            context_hidden, encoder_optimizer, decoder_optimizer, criterion, last)
-            # OLD
-            #loss = self._train(input_tensor, target_tensor)
-            #loss_avg += loss
-            #print_loss_total += loss
-
-            #loss += next_loss
-
-            return loss.data.item() / target_length, context_hidden
+            
     
     # Calculates loss value without updating weights. Used for validation
     # TODO: update with new context encoder
@@ -509,9 +497,9 @@ class Hred(object):
     #
     # Then we call "train" many times and occasionally print the progress (%
     # of examples, time so far, estimated time) and average loss.
-    def train_model(self, epochs, train_paragraphs, validation_paragraphs, # validation_size=0.1, validate_every=10, 
+    def train_model(self, epochs, train_paragraphs, validation_paragraphs, validate_every=10, # validation_size=0.1,
             embedding_type=None, save_temp_models=False, checkpoint_every=25, loss_dir=None,
-            print_every=1000, plot_every=100, evaluate_every=500):
+            print_every=10, plot_every=100, evaluate_every=500):
         global CHECKPOINT_DIR
         logfile = self.log.create('seq2seq-train-model')
         # TODO: re-add checkpoints and embeddings
@@ -679,7 +667,11 @@ class Hred(object):
         
         #random.shuffle(training_paragraphs) # shuffle the train pairs
         
-        
+        context_hidden = self.context.initHidden()
+        context_optimizer.zero_grad()
+        encoder_optimizer.zero_grad()
+        decoder_optimizer.zero_grad()
+
         iter = 0
         # Iterate through the training set over a set amount of epochs
         # Output the progress and current loss value
@@ -691,78 +683,67 @@ class Hred(object):
             self.log.debug(logfile, 'Processing epoch {}'.format(i))
             #training_group = variablesFromGroup(self.book, random.choice(self.groups))
 
-            context_hidden = self.context.initHidden()
-            context_optimizer.zero_grad()
-            encoder_optimizer.zero_grad()
-            decoder_optimizer.zero_grad()
-
             loss_avg = 0
             #for j in range(0, len(train_paragraphs)-1):
             for train_paragraph in train_paragraphs:
+                iter += 1
                 train_variables = variablesFromParagraph(self.book, train_paragraph)
                 #loss = 0
-                for j in range(len(train_variables)-1):
-                    iter += 1
-                    input_variable = train_variables[j]
-                    target_variable = train_variables[j+1]
-                    last = False
-                    if j+1 == len(train_variables)-1:
-                        last = True
-                    if last:
-                        loss, context_hidden = self._train(input_variable, target_variable, 
-                            context_hidden, encoder_optimizer, decoder_optimizer, criterion, last)
-                        #print(f'train_model: loss: {loss}')
+                loss, context_hidden = self._train_paragraph(train_variables,
+                    self.encoder, self.decoder, self.context,
+                    context_hidden, encoder_optimizer, decoder_optimizer, context_optimizer, criterion)
+                #print(f'train_model: loss: {loss}')
 
-                        loss_avg += loss
-                        print_loss_total += loss
-                        plot_loss_total += loss
+                loss_avg += loss
+                print_loss_total += loss
+                plot_loss_total += loss
 
-                    encoder_optimizer.step()
-                    decoder_optimizer.step()
-                    context_optimizer.step()
-                    #else:
-                    #    context_hidden = self._train(input_variable, target_variable,
-                    #            context_hidden, encoder_optimizer, decoder_optimizer, criterion, last)
-                    # OLD
-                    #loss = self._train(input_tensor, target_tensor)
-                    #loss_avg += loss
-                    #print_loss_total += loss
+                if iter % print_every == 0:
+                    print_loss_avg = print_loss_total / print_every
+                    print_loss_total = 0
+                    print('steps %d loss %.4f' % (iter, print_loss_avg)) # added from hred-pytorch.py
+                    # NOTE: may need if we modify code
 
-                    #loss += next_loss
-
-                    if iter % print_every == 0:
-                        print_loss_avg = print_loss_total / print_every
-                        print_loss_total = 0
-                        print('steps %d loss %.4f' % (iter, print_loss_avg)) # added from hred-pytorch.py
-                        # NOTE: may need if we modify code
-                        '''
-                        progress_percent = ((i-start_epoch)*len(train_paragraphs)+j)/((epochs-start_epoch)*len(train_paragraphs))
-                        t = -1.0
-                        if progress_percent > 0:
-                            t = timeSince(start, progress_percent)
-                        print('{} ({} {:.2f}%) {:.4f}'.format(t, ((i-start_epoch)*len(train_paragraphs)+j), progress_percent * 100, print_loss_avg))
-                        '''
-                    if iter % plot_every == 0:
-                        plot_loss_avg = plot_loss_total / plot_every
-                        plot_losses.append(plot_loss_avg)
-                        plot_loss_total = 0
-                    
-                    #if iter % evaluate_every == 0:
-                    #    self.evaluateRandomly()
+                progress_percent = ((i-start_epoch)*len(train_paragraphs)+j)/((epochs-start_epoch)*len(train_paragraphs))
+                t = -1.0
+                if progress_percent > 0:
+                    t = timeSince(start, progress_percent)
+                print('{} ({} {:.2f}%) {:.4f}'.format(t, ((i-start_epoch)*len(train_paragraphs)+j), progress_percent * 100, print_loss_avg))
+                
+                #if iter % evaluate_every == 0:
+                #    self.evaluateRandomly()
                 #print(f'loss for paragraph is {loss}')
             print(f'Epoch {i}, loss_avg: {loss_avg}')
-            loss_avg /= float(len(train_paragraphs)*4) # TODO: *4 or *5?
+            loss_avg /= float(len(train_paragraphs))
             print(f'\tAfter division: {loss_avg}')
+
+            # Save loss value
+            loss_avgs.append((i, loss_avg))
+            with open(LOSS_FILE_FORMAT.format(self.log.dir), 'a+') as f:
+                f.write('{},{}\t'.format(i, loss_avg))
 
             # Calculate loss on validation set:
             #TODO: re-add validation
-            
             if i > 0 and i % validate_every == 0:
+                # Create copies
+                encoder_optimizer_copy = copy.deepcopy(encoder_optimizer)
+                decoder_optimizer_copy = copy.deepcopy(decoder_optimizer)
+                context_optimizer_copy = copy.deepcopy(context_optimizer)
+                encoder_copy = copy.deepcopy(self.encoder)
+                decoder_copy = copy.deepcopy(self.decoder)
+                context_copy = copy.deepcopy(self.context)
+                context_hidden_copy = copy.deepcopy(context_hidden)
+                criterion_copy = copy.deepcopy(criterion)
+
                 validation_loss_avg = 0
-                for j, pair in enumerate(validation_paragraphs):
-                    input_tensor = pair[0]
-                    target_tensor = pair[1]
-                    validation_loss_avg += self._calculate_loss(input_tensor, target_tensor)
+                for j, validation_paragraph in enumerate(validation_paragraphs):
+                    validation_variables = variablesFromParagraph(self.book, validation_paragraph)
+                    
+                    loss, _ = self._train_paragraph(validation_variables,
+                            encoder_copy, decoder_copy, context_copy,
+                            context_hidden_copy, encoder_optimizer_copy, decoder_optimizer_copy, context_optimizer_copy, 
+                            criterion_copy)
+                    validation_loss_avg += loss
                 # Save validation loss value
                 validation_loss_avg /= len(validation_paragraphs)
                 validation_loss_avgs.append((i, validation_loss_avg))
@@ -797,11 +778,7 @@ class Hred(object):
                     else:
                         self.log.error(logfile, 'Could not find temporary model at epoch={}'.format(i-1))
             
-            # Save loss value
-            loss_avg /= len(training_pairs)
-            loss_avgs.append((i, loss_avg))
-            with open(LOSS_FILE_FORMAT.format(self.log.dir), 'a+') as f:
-                    f.write('{},{}\t'.format(i, loss_avg))
+            
             """
         # Save the entirety of the loss values
         # TODO: re-add for above additions
