@@ -25,3 +25,5 @@ launch.json
 *_train.txt
 *_test.txt
 *_test/
+*_paragraphs.txt
+*_summary.txt
