@@ -9,7 +9,10 @@ from torch import optim
 from torch.autograd import Variable
 
 from nltk.translate.bleu_score import sentence_bleu
-import matplotlib, numpy as np, matplotlib.pyplot as plt
+import numpy as np
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
 from storygen import book, encoder, decoder, glove, log
 from storygen.book import START_ID, STOP_ID
@@ -497,7 +500,7 @@ class Hred(object):
     #
     # Then we call "train" many times and occasionally print the progress (%
     # of examples, time so far, estimated time) and average loss.
-    def train_model(self, epochs, train_paragraphs, validation_paragraphs, validate_every=10, # validation_size=0.1,
+    def train_model(self, epochs, train_paragraphs, validation_paragraphs, validate_every=3, # validation_size=0.1,
             embedding_type=None, save_temp_models=False, checkpoint_every=25, loss_dir=None,
             print_every=10, plot_every=100, evaluate_every=500):
         global CHECKPOINT_DIR
@@ -630,7 +633,9 @@ class Hred(object):
                     # Create random vector of dimension 'embedding_size', scale=0.6 taken from tutorial
                     weights_matrix[idx] = np.random.normal(scale=0.6, size=(self.embedding_size, ))
             # Convert weights_matrix to a Tensor
-            weights_matrix = torch.tensor(weights_matrix, device=self.device)
+            weights_matrix = torch.tensor(weights_matrix)
+            if USE_CUDA:
+                weights_matrix = weights_matrix.cuda()
             print('We found {}/{} words in our GloVe words2vec dict!'.format(words_found, self.book.n_words))
             self.log.info(logfile, 'Found {}/{} words in the GloVe dict.'.format(words_found, self.book.n_words))
             # Set the embedding layer's state_dict for encoder and decoder
@@ -685,34 +690,39 @@ class Hred(object):
 
             loss_avg = 0
             #for j in range(0, len(train_paragraphs)-1):
-            for train_paragraph in train_paragraphs:
+            for j, train_paragraph in enumerate(train_paragraphs):
                 iter += 1
-                train_variables = variablesFromParagraph(self.book, train_paragraph)
+                #train_variables = variablesFromParagraph(self.book, train_paragraph)
                 #loss = 0
-                loss, context_hidden = self._train_paragraph(train_variables,
+                loss, context_hidden = self._train_paragraph(train_paragraph,
                     self.encoder, self.decoder, self.context,
                     context_hidden, encoder_optimizer, decoder_optimizer, context_optimizer, criterion)
                 #print(f'train_model: loss: {loss}')
 
                 loss_avg += loss
                 print_loss_total += loss
+                '''
+                print_loss_total += loss
                 plot_loss_total += loss
 
                 if iter % print_every == 0:
                     print_loss_avg = print_loss_total / print_every
                     print_loss_total = 0
-                    print('steps %d loss %.4f' % (iter, print_loss_avg)) # added from hred-pytorch.py
+                    
                     # NOTE: may need if we modify code
+                '''
+                if j % print_every == 0:
+                    print_loss_avg = print_loss_total / print_every
+                    print_loss_total = 0
 
-                progress_percent = ((i-start_epoch)*len(train_paragraphs)+j)/((epochs-start_epoch)*len(train_paragraphs))
-                t = -1.0
-                if progress_percent > 0:
-                    t = timeSince(start, progress_percent)
-                print('{} ({} {:.2f}%) {:.4f}'.format(t, ((i-start_epoch)*len(train_paragraphs)+j), progress_percent * 100, print_loss_avg))
+                    epochs_processed = (i-start_epoch)*len(train_paragraphs)+j
+
+                    progress_percent = epochs_processed / ((epochs-start_epoch)*len(train_paragraphs))
+                    t = -1.0
+                    if progress_percent > 0:
+                        t = timeSince(start, progress_percent)
+                    print('{} ({} {:.2f}%) {:.4f}'.format(t, epochs_processed, progress_percent * 100, print_loss_avg))
                 
-                #if iter % evaluate_every == 0:
-                #    self.evaluateRandomly()
-                #print(f'loss for paragraph is {loss}')
             print(f'Epoch {i}, loss_avg: {loss_avg}')
             loss_avg /= float(len(train_paragraphs))
             print(f'\tAfter division: {loss_avg}')
@@ -737,9 +747,9 @@ class Hred(object):
 
                 validation_loss_avg = 0
                 for j, validation_paragraph in enumerate(validation_paragraphs):
-                    validation_variables = variablesFromParagraph(self.book, validation_paragraph)
+                    #validation_variables = variablesFromParagraph(self.book, validation_paragraph)
                     
-                    loss, _ = self._train_paragraph(validation_variables,
+                    loss, _ = self._train_paragraph(validation_paragraph,
                             encoder_copy, decoder_copy, context_copy,
                             context_hidden_copy, encoder_optimizer_copy, decoder_optimizer_copy, context_optimizer_copy, 
                             criterion_copy)

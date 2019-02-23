@@ -24,12 +24,11 @@ if __name__=='__main__':
     train_paragraphs, test_paragraphs, validation_paragraphs = [], [], []
     with open('data/train_raw.pkl', 'rb') as f:
         train_paragraphs = pickle.load(f)
-    '''
+    
     with open('data/validate_raw.pkl', 'rb') as f:
-        train_paragraphs = pickle.load(f)
+        test_paragraphs = pickle.load(f)
     with open('data/test_raw.pkl', 'rb') as f:
-        train_paragraphs = pickle.load(f)
-    '''
+        validation_paragraphs = pickle.load(f)
 
     paragraphs = train_paragraphs + test_paragraphs + validation_paragraphs
 
@@ -54,7 +53,7 @@ if __name__=='__main__':
             #decoder_file='decoder_5.model',
             #context_file='context_5.model')
 
-    epochs = 10
+    epochs = 100
 
     print(f'Training for {epochs} epochs')
     hred.train_model(epochs, train_paragraphs, validation_paragraphs)
