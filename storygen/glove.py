@@ -7,12 +7,12 @@ import timeit
 
 DIMENSION_SIZES  = [50, 100, 200, 300]
 DATA_FILE_FORMAT = 'data/glove.6B/glove.6B.{}d.txt'
-OBJ_FILE_FORMAT  = 'obj_glove/glove.6B/globe.6B.{}d.pickle'
+OBJ_FILE_FORMAT  = 'data/glove.6B/glove.6B.{}d.pkl'
 # Custom embeddings
-DATA_SG_FILE = 'data/vectors-sg.txt'
-OBJ_SG_FILE = 'obj_sg/vectors-sg.pickle'
-DATA_CBOW_FILE = 'data/vectors-cbow.txt'
-OBJ_CBOW_FILE = 'obj_cbow/vectors-cbow.pickle'
+DATA_SG_FILE = 'data/sg/vectors-sg.txt'
+OBJ_SG_FILE = 'data/sg/vectors-sg.pkl'
+DATA_CBOW_FILE = 'data/cbow/vectors-cbow.txt'
+OBJ_CBOW_FILE = 'data/cbow/vectors-cbow.pkl'
 
 def generate_glove(dim_size=50, local=False, embedding_type='glove'):
     if embedding_type == 'glove':

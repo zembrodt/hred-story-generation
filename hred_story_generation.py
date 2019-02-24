@@ -1,12 +1,26 @@
-import pickle
+import getopt, pickle, sys
 from storygen.hred import Hred
 from storygen.book import Book
+from storygen.glove import DIMENSION_SIZES
 
 HIDDEN_SIZE = 256
+EMBEDDING_SIZE = DIMENSION_SIZES[-1]
+DATA_FILE_FORMAT = 'data/{}_{}_{}.txt'
 
-# embeddings not yet implemented
-# TODO: ONLY TEMPORARY FOR NO EMBEDDINGS:
-EMBEDDING_SIZE = HIDDEN_SIZE
+EMBEDDINGS = ['glove', 'cbow', 'sg']
+
+# Help message for command line arguments
+# TODO: this may need to be updated
+HELP_MSG = '\n'.join([
+		'Usage:',
+		'python3 story_generation.py [-h, --help] [--epoch <epoch_value>] [--embedding <embedding_type>] [--loss <loss_dir>]',
+		'\tAll command line arguments are optional, and any combination (beides -h) can be used',
+		'\t-h, --help: Provides help on command line parameters',
+		'\t--epoch <epoch_value>: specify an epoch value to train the model for or load a checkpoint from',
+		'\t--embedding <embedding_type>: specify an embedding to use from: [glove, cbow, sg]',
+		'\t--loss <loss_dir>: specify a directory to load loss values from (requires files loss.dat and validation.dat)',
+		'\t-u, --update: specify that if previous train/test pairs exists, overwrite them with re-parsed data'])
+
 
 # Creates a book object from the given train/test pairs
 def get_book(book_title, paragraphs):
@@ -19,7 +33,48 @@ def get_book(book_title, paragraphs):
 
     return bk
 
-if __name__=='__main__':
+def main(argv):
+    # Get command line arguments
+    try:
+        opts, _ = getopt.getopt(argv, 'hu', ['epoch=', 'embedding=', 'loss=', 'help', 'update'])
+    except getopt.GetoptError as e:
+        print(e)
+        print(HELP_MSG)
+        exit(2)
+
+    # Default values
+    epoch_size = 100
+    embedding_type = None
+    loss_dir = None
+    load_previous = True
+
+    # Set values from command line
+    for opt, arg in opts:
+        if opt in ('-h', '--help'):
+            print(HELP_MSG)
+            exit()
+        # How many epochs to train for
+        elif opt == '--epoch':
+            try:
+                epoch_size = int(arg)
+            except ValueError:
+                print('{} is not an integer. Argument must be an int.'.format(arg))
+                exit()
+        # The type of embedding to use
+        elif opt == '--embedding':
+            embedding_type = arg
+        # Directory to load previous loss values from
+        elif opt == '--loss':
+            loss_dir = arg
+        # Flag to overwrite saved train/test pairs (if they exist)
+        elif opt in ('-u', '--update'):
+            load_previous = False
+
+    print('Epoch size        = {}'.format(epoch_size))
+    print('Embedding type    = {}'.format(embedding_type))
+    print('Loss directory    = {}'.format(loss_dir))
+    print('Hidden layer size = {}'.format(HIDDEN_SIZE))
+
     # prepare data
     train_paragraphs, test_paragraphs, validation_paragraphs = [], [], []
     with open('data/train_raw.pkl', 'rb') as f:
@@ -53,7 +108,9 @@ if __name__=='__main__':
             #decoder_file='decoder_5.model',
             #context_file='context_5.model')
 
-    epochs = 100
+    print(f'Training for {epoch_size} epochs')
+    hred.train_model(epoch_size, train_paragraphs, validation_paragraphs,
+            embedding_type=embedding_type, loss_dir=loss_dir)
 
-    print(f'Training for {epochs} epochs')
-    hred.train_model(epochs, train_paragraphs, validation_paragraphs)
+if __name__=='__main__':
+    main(sys.argv[1:])

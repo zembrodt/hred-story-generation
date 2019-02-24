@@ -184,7 +184,7 @@ class Hred(object):
         #def __init__(self, output_size, hidden_size, embedding_size, max_length, dropout_p=0.1):
         self.decoder = DecoderRNN(self.book.n_words, self.hidden_size, self.embedding_size, self.max_length)
 
-        self.context = ContextRNN(self.hidden_size, self.book.n_words)
+        self.context = ContextRNN(self.book.n_words, self.hidden_size, self.embedding_size)
 
         if self.encoder_file and type(self.encoder_file)==str and os.path.exists(self.encoder_file):
             self.encoder.load_state_dict(torch.load(self.encoder_file))
@@ -236,7 +236,7 @@ class Hred(object):
             #self.decoder_optimizer = optim.SGD(self.decoder.parameters(), lr=learning_rate)
             #self.decoder_optimizer.load_state_dict(decoder_checkpoint[OPTIMIZER])
 
-            self.context = ContextRNN(self.hidden_size, self.book.n_words)
+            self.context = ContextRNN(self.book.n_words, self.hidden_size, self.embedding_size)
             self.context.load_state_dict(context_checkpoint[STATE_DICT])
 
             if USE_CUDA:
@@ -304,6 +304,8 @@ class Hred(object):
             else:
                 print(f'Somehow we got ei={ei} for range({input_length}) where max_length={self.max_length}')
 
+        # NOTE: my method (incorrect?)
+        '''
         # The "sentence vector" is the hidden state obtained after the last token of the sentence has been processed
         sentence_vector = encoder_hidden
         # The Context RNN keeps track of past sentences by processing iteratively each sentence vector
@@ -321,13 +323,22 @@ class Hred(object):
             decoder_input = decoder_input.cuda()
         #print(f'decoder_input: {decoder_input}')
 
-        #decoder_hidden = encoder_hidden # NOTE: I don't think we have any direct interaction between the encoder and decoder
+        decoder_hidden = decoder_model.initHidden()
+        '''
+        ## End my method
+
+        # NOTE: hred.py method
+        decoder_input = Variable(torch.LongTensor([[START_ID]]))
+        if USE_CUDA:
+            decoder_input = decoder_input.cuda()
+        
+        decoder_hidden = encoder_hidden # NOTE: I don't think we have any direct interaction between the encoder and decoder
 
         # Calculate context
-        #context_output, context_hidden = context_model(encoder_output, context_hidden) # NOTE: already calculated
+        context_output, context_hidden = context_model(encoder_output, context_input) 
         # It doesn't seem that the encoder output is used for anything, rather its hidden state is sent to context RNN
-
-        decoder_hidden = decoder_model.initHidden()
+        ## End hred.p method
+        
 
         use_teacher_forcing = True if random.random() < self.teacher_forcing_ratio else False
 
@@ -335,7 +346,7 @@ class Hred(object):
             # Teacher forcing: Feed the target as the next input
             for di in range(target_length):
                 decoder_output, decoder_hidden, decoder_attention = decoder_model(
-                    decoder_input, decoder_hidden, encoder_outputs, context_hidden)
+                        decoder_input, decoder_hidden, encoder_outputs, context_hidden)
                 
                 if last:
                     #loss += criterion(decoder_output[0], target_variable[di]) #NOTE: this is how it is in other project?
@@ -614,7 +625,7 @@ class Hred(object):
             else:
                 self.encoder = EncoderRNN(self.book.n_words, self.hidden_size, self.embedding_size)#.to(self.device)
                 self.decoder = DecoderRNN(self.book.n_words, self.hidden_size, self.embedding_size, self.max_length)#.to(self.device)
-                self.context = ContextRNN(self.book.n_words, self.hidden_size)
+                self.context = ContextRNN(self.book.n_words, self.hidden_size, self.embedding_size)
 
         
         # Create the GloVe embedding's weight matrix:

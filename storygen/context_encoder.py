@@ -6,12 +6,13 @@ from torch.autograd import Variable
 USE_CUDA = torch.cuda.is_available()
 
 class ContextRNN(nn.Module):
-    def __init__(self, hidden_size, output_size, n_layers=1):
+    def __init__(self, output_size, hidden_size, embedding_size, n_layers=1):
         super(ContextRNN, self).__init__()
         self.n_layers = n_layers
         self.hidden_size = hidden_size
+        self.embedding_size = embedding_size
 
-        self.embedding = nn.Embedding(output_size, hidden_size)
+        #self.embedding = nn.Embedding(output_size, embedding_size)
         self.gru = nn.GRU(hidden_size, hidden_size)
 
     def forward(self, input, hidden):
