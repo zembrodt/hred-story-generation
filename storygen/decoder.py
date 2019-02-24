@@ -47,22 +47,9 @@ class DecoderRNN(nn.Module):
         self.out = nn.Linear(self.hidden_size, self.output_size)
 
     def forward(self, input, hidden, encoder_outputs, context):
-        print(f'input size:            {input.size()}')
-        print(f'hidden size:           {hidden.size()}')
-        for i, encoder_output in enumerate(encoder_outputs):    
-            print(f'encoder output[{i}]:   {encoder_output.size()}')
-        print(f'context size:          {context.size()}')
-
-        #print(f'input: {input}')
-        #print(f'self.embedding: {self.embedding}')
-        #print(f'self.embedding(input).view(1, 1, -1): {self.embedding(input).view(1, 1, -1)}')
         embedded = self.embedding(input).view(1, 1, -1)
         embedded = self.dropout(embedded)
 
-        print(f'embedded[0]: {embedded[0].size()}')
-        print(f'hidden[0]:   {hidden[0].size()}')
-        print(f'torch.cat size: {torch.cat((embedded[0], hidden[0]), 1).size()}')
-        #print(f'torch.cat:      {torch.cat((embedded[0], hidden[0]), 1)}')
         attn_weights = F.softmax(
             self.attn(torch.cat((embedded[0], hidden[0]), 1)), dim=1)
         attn_applied = torch.bmm(attn_weights.unsqueeze(0),
@@ -75,12 +62,10 @@ class DecoderRNN(nn.Module):
         # inputs are concatenation of previous output and context
         #for i in range(self.n_layers): #NOTE: more than one layer is not implemented yet?
         output = F.relu(output)
-        print(f'Output[0] size:   {output.size()}')
-        print(f'Context[0] size:  {context.size()}')
-        print(f'linear transform: {self.context_transform(torch.cat((output[0], context[0]), 1)).size()}')
+
         #output = torch.cat((output, context), 0)
         # Added: transforming a 256+300-d tensor into 300-d tensor for the GRU
-        output = self.context_transform(torch.cat((output[0], context[0]), 1)) # NOTE: not sure if this is correct
+        output = self.context_transform(torch.cat((output[0], context[0]), 1)).unsqueeze(0) # NOTE: not sure if this is correct
         output, hidden = self.gru(output, hidden)
 
         """ previous output for just decoer
