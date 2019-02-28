@@ -594,9 +594,10 @@ class Hred(object):
         plot_loss_total = 0  # Reset every plot_every
 
         # NOTE: Originally optim.SGD
-        encoder_optimizer = optim.Adam(self.encoder.parameters(), lr=self.learning_rate)
-        decoder_optimizer = optim.Adam(self.decoder.parameters(), lr=self.learning_rate)
-        context_optimizer = optim.Adam(self.context.parameters(), lr=self.learning_rate)
+        # Have tested using optim.Adam
+        encoder_optimizer = optim.SGD(self.encoder.parameters(), lr=self.learning_rate)
+        decoder_optimizer = optim.SGD(self.decoder.parameters(), lr=self.learning_rate)
+        context_optimizer = optim.SGD(self.context.parameters(), lr=self.learning_rate)
         
         criterion = nn.NLLLoss()
 
