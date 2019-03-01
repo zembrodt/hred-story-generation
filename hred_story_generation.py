@@ -2,6 +2,7 @@ import getopt, pickle, sys
 from storygen.hred import Hred
 from storygen.book import Book
 from storygen.glove import DIMENSION_SIZES
+from storygen.log import Log
 
 HIDDEN_SIZE = 256
 EMBEDDING_SIZE = DIMENSION_SIZES[-1]
@@ -34,6 +35,9 @@ def get_book(book_title, paragraphs):
     return bk
 
 def main(argv):
+    log = Log()
+    logfile = log.create('hred-story-generation')
+
     # Get command line arguments
     try:
         opts, _ = getopt.getopt(argv, 'hu', ['epoch=', 'embedding=', 'loss=', 'help', 'update'])
@@ -76,16 +80,15 @@ def main(argv):
     print('Hidden layer size = {}'.format(HIDDEN_SIZE))
 
     # prepare data
-    train_paragraphs, test_paragraphs, validation_paragraphs = [], [], []
+    train_paragraphs, validation_paragraphs, test_paragraphs = [], [], []
     with open('data/train_raw.pkl', 'rb') as f:
         train_paragraphs = pickle.load(f)
-    
     with open('data/validate_raw.pkl', 'rb') as f:
-        test_paragraphs = pickle.load(f)
-    with open('data/test_raw.pkl', 'rb') as f:
         validation_paragraphs = pickle.load(f)
+    with open('data/test_raw.pkl', 'rb') as f:
+        test_paragraphs = pickle.load(f)
 
-    paragraphs = train_paragraphs + test_paragraphs + validation_paragraphs
+    paragraphs = train_paragraphs + validation_paragraphs + test_paragraphs
 
     MAX_LENGTH = max(
         max(map(len, [sentence for sentence in paragraph]))
@@ -110,7 +113,17 @@ def main(argv):
 
     print(f'Training for {epoch_size} epochs')
     hred.train_model(epoch_size, train_paragraphs, validation_paragraphs,
-            embedding_type=embedding_type, loss_dir=loss_dir)
+            embedding_type=embedding_type, loss_dir=loss_dir, save_temp_models=True)
+
+    print('Training complete.')
+
+    print(f'Evaluating {len(test_paragraphs)} paragraphs')
+    for test_paragraph in test_paragraphs:
+        decoded_words, _ = hred._evaluate(test_paragraph)
+        for sentence in test_paragraph[:-1]:
+            log.info(logfile, f'> {" ".join(sentence)}')
+        log.info(logfile, f'= {" ".join(test_paragraph[-1])}')
+        log.info(logfile, f'< {" ".join(decoded_words)}')
 
 if __name__=='__main__':
     main(sys.argv[1:])

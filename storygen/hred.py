@@ -466,7 +466,7 @@ class Hred(object):
         # Check if any checkpoints for this model exist:
         encoders = set()
         decoders = set()
-        context = set()
+        contexts = set()
 
         for filename in os.listdir('{}/'.format(CHECKPOINT_DIR)):
             r_enc = re.search(CHECKPOINT_FORMAT.format('encoder', self.embedding_size, self.hidden_size, self.max_length), filename)
@@ -478,8 +478,11 @@ class Hred(object):
                     decoders.add(int(r_dec.group(1)))
                 else:
                     r_con = re.search(CHECKPOINT_FORMAT.format('context', self.embedding_size, self.hidden_size, self.max_length), filename)
+                    if r_con:
+                        contexts.add(int(r_con.group(1)))
         # A checkpoint needs a valid encoder and decoder 
-        checkpoints = encoders.intersection(decoders).intersection(context)
+        checkpoints = encoders.intersection(decoders).intersection(contexts)
+        
         print('Checkpoints found at: {}'.format(checkpoints))
         self.log.debug(logfile, 'Checkpoints found at: {}'.format(checkpoints))
         start_epoch = 0
@@ -624,7 +627,6 @@ class Hred(object):
         # Output the progress and current loss value
         # temp:
         print(f'Training size: {len(train_paragraphs)}')
-        start_epoch = 0
         for i in range(start_epoch, epochs):
             print(f'Processing epoch {i}...')
             self.log.debug(logfile, 'Processing epoch {}'.format(i))
@@ -736,7 +738,8 @@ class Hred(object):
         self.log.debug(loss_logfile, 'Loss averages: {}'.format(loss_avgs))
         self.log.info(logfile, 'Finished training on data for {} epochs.'.format(epochs))
         self.log.debug(logfile, 'Average loss={:.4f}'.format(float(sum([item[1] for item in loss_avgs]))/len(loss_avgs)))
-        self.log.debug(logfile, 'Average validation loss={:.4f}'.format(float(sum([item[1] for item in validation_loss_avgs])) / len(validation_loss_avgs)))
+        if len(validation_loss_avgs) > 0:
+            self.log.debug(logfile, 'Average validation loss={:.4f}'.format(float(sum([item[1] for item in validation_loss_avgs])) / len(validation_loss_avgs)))
         plt.plot([item[0] for item in loss_avgs], [item[1] for item in loss_avgs], label='Training')
         plt.plot([item[0] for item in validation_loss_avgs], [item[1] for item in validation_loss_avgs], label='Validation')
         plt.legend()
@@ -755,40 +758,63 @@ class Hred(object):
     # predicts the EOL token we stop there. We also store the decoder's
     # attention outputs for display later.
     #
-    """ removed for now, had issues with passing data between functions???
-    def _get_encoder_outputs(self, sentence):
+    def _evaluate(self, paragraph):
         with torch.no_grad():
-            input_tensor = tensorFromSentence(self.input_book, sentence, self.device)
-            input_length = input_tensor.size()[0]
-            encoder_hidden = self.encoder.initHidden(self.device)
+            decoded_words = []
+            decoder_attentions = torch.zeros(self.max_length, self.max_length)
+            context_hidden = self.context.initHidden()
 
-            encoder_outputs = torch.zeros(self.max_length, self.encoder.hidden_size, device=self.device)
-
-            for ei in range(input_length):
-                encoder_output, encoder_hidden = self.encoder(input_tensor[ei], encoder_hidden)
-                encoder_outputs[ei] += encoder_output[0, 0]
-
-            return encoder_outputs, encoder_hidden
-
-    def _get_k_results(self, decoder_input, decoder_hidden, encoder_outputs, k):
-        with torch.no_grad():
-            decoder_output, decoder_hidden, decoder_attention = self.decoder(
-                decoder_input, decoder_hidden, encoder_outputs)
+            variables = variablesFromParagraph(self.book, paragraph)
             
-            topv, topi = decoder_output.data.topk(k)
-            if self.i == 0:
-                print('decoder_output.data.topk(k):\ntopv=%s\ntopi=%s'%(str(topv), str(topi)))
-                self.i+=1
+            for i in range(len(variables)-1):
+                last = False
+                if i+1 == len(variables)-1:
+                    last = True
+                input_variable = variables[i]
+                input_length = input_variable.size()[0]
+                encoder_hidden = self.encoder.initHidden()
 
-            topv = topv.squeeze()
-            topi = topi.squeeze()
+                encoder_outputs = Variable(torch.zeros(self.max_length, self.encoder.hidden_size))
+                if USE_CUDA:
+                    encoder_outputs = encoder_outputs.cuda()
 
-            # Store the k results in the format [(value_0, index_0, decoder_hidden_0), ..., (value_k, index_k, decoder_hidden_k)]
-            return [(topv[i].item(), topi[i].item(), decoder_hidden) for i in range(topv.size()[0])]
+                for ei in range(input_length):
+                    if ei < self.max_length:
+                        encoder_output, encoder_hidden = self.encoder(input_variable[ei], encoder_hidden)
+                        encoder_outputs[ei] = encoder_outputs[ei] + encoder_output[0][0]
+                        # NOTE: why is this [ei] + [0][0]
 
-            # Converting to BeamSearchResult class
-            #return [BeamSearchResult(topv[i].item(), topi[i].item(), decoder_hidden) for i in range(topv.size()[0])]
-    """
+                # calculate context
+                context_output, context_hidden = self.context(context_hidden, encoder_hidden)
+
+                # Do we need to care that we don't decode the first pairs?
+                if last:
+                    target_variable = variables[i+1]
+
+                    decoder_input = Variable(torch.LongTensor([[START_ID]]))  # SOS
+                    if USE_CUDA:
+                        decoder_input = decoder_input.cuda()
+
+                    decoder_hidden = context_output
+
+                    decoder_inputs = [decoder_input]
+                    decoder_hiddens = [decoder_hidden]
+                    for di in range(self.max_length):
+                        decoder_output, decoder_hidden, decoder_attention = self.decoder(
+                            decoder_input, decoder_hidden, encoder_outputs, context_hidden)
+                        
+                        topv, topi = decoder_output.data.topk(1)
+
+                        if topi.item() == book.STOP_ID:
+                            decoded_words.append(book.STOP_TOKEN)
+                            break
+                        else:
+                            decoded_words.append(self.book.index2word[topi.item()])
+
+                        decoder_input = topi.squeeze().detach()
+
+            return decoded_words, decoder_attentions[:di + 1]
+    
     # NOTE: original functions
     # Performs beam search on the data to find better scoring sentences (evaluate uses a "beam search" of k=1)
     """
@@ -849,6 +875,7 @@ class Hred(object):
 
     #NOTE: original functions
     # Forces the model to generate the 'sentence_to_evaluate' and records its perplexity per word
+    '''
     def _evaluate_specified(self, paragraph, last_sentence):
         with torch.no_grad():
             input_tensor = tensorFromSentence(self.book, sentence, self.device)
@@ -909,48 +936,10 @@ class Hred(object):
 
             #return decoded_words, decoder_attentions, perplexity
             return perplexity
-    """
-    def old_evaluate(self, sentence):
-        with torch.no_grad():
-            input_tensor = tensorFromSentence(self.book, sentence, self.device)
-                
-            input_length = input_tensor.size()[0]
-            encoder_hidden = self.encoder.initHidden(self.device)
+    '''
 
-            encoder_outputs = torch.zeros(self.max_length, self.encoder.hidden_size, device=self.device)
-
-            for ei in range(input_length):
-                encoder_output, encoder_hidden = self.encoder(input_tensor[ei], encoder_hidden)
-                encoder_outputs[ei] += encoder_output[0, 0]
-
-            decoder_input = torch.tensor([[START_ID]], device=self.device)  # SOL
-
-            decoder_hidden = encoder_hidden
-
-            decoded_words = []
-            decoder_attentions = torch.zeros(self.max_length, self.max_length)
-
-            for di in range(self.max_length):
-                decoder_output, decoder_hidden, decoder_attention = self.decoder(
-                    decoder_input, decoder_hidden, encoder_outputs)
-                decoder_attentions[di] = decoder_attention.data
-                
-                # output.data contains all log probabilities and distribution(?)
-                # force the program to generate a sentence and record the probability of doing so
-                topv, topi = decoder_output.data.topk(1)
-
-                if topi.item() == STOP_ID:
-                    #decoded_words.append('<EOL>')
-                    break
-                else:
-                    # Decode the predicted word from the book 
-                    decoded_words.append(self.book.index2word[topi.item()])
-
-                decoder_input = topi.squeeze().detach()
-
-            return decoded_words, decoder_attentions[:di + 1]
-    """
-
+    # Evaluate from hred.py
+    '''
     def evaluate(self, sentences, beam=5):
         decoded_words = []
         decoder_attentions = torch.zeros(self.max_length, self.max_length)
@@ -1023,7 +1012,7 @@ class Hred(object):
                         decoded_words.append(self.book.index2word[int(ni)])
 
         return decoded_words
-
+    '''
     def evaluateRandomly(self, n=10):
         for i in range(n):
             group = random.choice(self.groups)
@@ -1037,6 +1026,7 @@ class Hred(object):
     ######################################################################
     # Evaluates each pair given in the test set
     # Returns BLEU, METEOR, and perplexity scores
+    '''
     def evaluate_test_set(self, test_paragraphs, use_beam_search=True, k=5, print_first=15, print_every=100):
         logfile = self.log.create('evaluate_test_set')
 
@@ -1156,3 +1146,4 @@ class Hred(object):
                 avg_perplexity, empty_sentences, avg_bleu, avg_meteor))
         
             return avg_perplexity, avg_bleu, avg_meteor
+    '''
