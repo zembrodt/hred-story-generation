@@ -849,8 +849,7 @@ class Hred(object):
 
     #NOTE: original functions
     # Forces the model to generate the 'sentence_to_evaluate' and records its perplexity per word
-    """
-    def _evaluate_specified(self, sentence, sentence_to_evaluate):
+    def _evaluate_specified(self, paragraph, last_sentence):
         with torch.no_grad():
             input_tensor = tensorFromSentence(self.book, sentence, self.device)
                 
@@ -910,7 +909,7 @@ class Hred(object):
 
             #return decoded_words, decoder_attentions, perplexity
             return perplexity
-
+    """
     def old_evaluate(self, sentence):
         with torch.no_grad():
             input_tensor = tensorFromSentence(self.book, sentence, self.device)
@@ -1038,7 +1037,7 @@ class Hred(object):
     ######################################################################
     # Evaluates each pair given in the test set
     # Returns BLEU, METEOR, and perplexity scores
-    def evaluate_test_set(self, test_pairs, use_beam_search=True, k=5, print_first=15, print_every=100):
+    def evaluate_test_set(self, test_paragraphs, use_beam_search=True, k=5, print_first=15, print_every=100):
         logfile = self.log.create('evaluate_test_set')
 
         print('Printing first {} evaluations:'.format(print_first))
@@ -1057,14 +1056,15 @@ class Hred(object):
         beam_empty_sentences = 0
         
         # Loop through the test set
-        for i, test_pair in enumerate(test_pairs):
+        for i, test_paragraph in enumerate(test_paragraphs):
             if (i+1)%print_every == 0:
                 self.log.info(logfile, 'Evaluating test pair {}'.format(i+1))
-                self.log.debug(logfile, '> {}'.format(test_pair[0]))
-                self.log.debug(logfile, '= {}'.format(test_pair[1]))
+                for sentence in test_paragraph[:-1]:
+                    self.log.debug(logfile, f'> {sentence}')
+                self.log.debug(logfile, f'= {test_paragraph[-1]}'
             
             # Calculate perplexity of the test pair
-            perplexity = self._evaluate_specified(test_pair[0], test_pair[1])
+            perplexity = self._evaluate_specified(test_paragraph[:-1], test_paragraph[-1])
             perplexity_total += perplexity
             
             #Predict using beam search
