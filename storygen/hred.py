@@ -36,6 +36,10 @@ VALIDATION_LOSS_FILE_FORMAT = '{}validation.dat'
 # State dicts fields
 STATE_DICT = 'state_dict'
 OPTIMIZER = 'optimizer'
+OPTIMIZER_TYPE = 'optimizer_type'
+CONTEXT_HIDDEN = 'context_hidden'
+
+OPTIMIZER_TYPES = ['adam', 'sgd']
 
 ## HELPER FUNCTIONS ##
 # Converts a sentence into a list of indexes
@@ -131,10 +135,7 @@ class BeamSearchResult:
 # Represents a Sequence to Sequence network made up of an encoder RNN and decoder RNN with attention weights
 class Hred(object):
     def __init__(self, book, max_length, hidden_size, embedding_size, 
-            #groups=None,      # qa data in groups
-            encoder_file=None,
-            decoder_file=None,
-            context_file=None,
+            optimizer_type='adam',
             teacher_forcing_ratio=0.5,
             beam=5,
             context_layers = 1,
@@ -152,11 +153,9 @@ class Hred(object):
         self.decoder = None
         self.context = None
 
+        self.context_hidden = None
+
         # New parameters
-        #self.groups = groups
-        self.encoder_file = encoder_file
-        self.decoder_file = decoder_file
-        self.context_file = context_file
         self.teacher_forcing_ratio = teacher_forcing_ratio
         self.beam = beam
         self.context_layers = context_layers
@@ -164,9 +163,11 @@ class Hred(object):
         self.decoder_layers = decoder_layers
         self.learning_rate = learning_rate
         
-        """
+        self.optimizer_type = optimizer_type
         self.encoder_optimizer = None
         self.decoder_optimizer = None
+        self.context_optimizer = None
+        """
         self.criterion = None
         """
         self.log = log.Log()
@@ -174,41 +175,7 @@ class Hred(object):
         #self.i = 0
         #self.j = 0
 
-        self.create_or_load_models()
-
-    ## NEW loading func
-    # Loads models if a file is given, otherwise creates new ones
-    def create_or_load_models(self):
-        self.encoder = EncoderRNN(self.book.n_words, self.hidden_size, self.embedding_size)
-        
-        #def __init__(self, output_size, hidden_size, embedding_size, max_length, dropout_p=0.1):
-        self.decoder = DecoderRNN(self.book.n_words, self.hidden_size, self.embedding_size, self.max_length)
-
-        self.context = ContextRNN(self.book.n_words, self.hidden_size, self.embedding_size)
-
-        if self.encoder_file and type(self.encoder_file)==str and os.path.exists(self.encoder_file):
-            self.encoder.load_state_dict(torch.load(self.encoder_file))
-
-        if self.decoder_file and type(self.decoder_file)==str and os.path.exists(self.decoder_file):
-            self.decoder.load_state_dict(torch.load(self.decoder_file))
-
-        if self.context_file and type(self.context_file)==str and os.path.exists(self.context_file):
-            self.context.load_state_dict(torch.load(self.context_file))
-
-        if USE_CUDA:
-            self.encoder = self.encoder.cuda()
-            self.decoder = self.decoder.cuda()
-            self.context = self.context.cuda()
-
-        """
-        self.encoder_model = encoder_model
-        self.decoder_model = decoder_model
-        self.context_model = context_model
-        """
-
-    ## ORIGINAL loading func
-    
-    def loadFromFiles(self, encoder_filename, decoder_filename, context_filename, learning_rate=0.01):
+    def loadFromFiles(self, encoder_filename, decoder_filename, context_filename):
         # Check that the path for both files exists
         os.makedirs(os.path.dirname(encoder_filename), exist_ok=True)
         os.makedirs(os.path.dirname(decoder_filename), exist_ok=True)
@@ -225,24 +192,45 @@ class Hred(object):
             decoder_checkpoint = torch.load(decoder_file)
             context_checkpoint = torch.load(context_file)
 
+            # Load encoder
             self.encoder = EncoderRNN(self.book.n_words, self.hidden_size, self.embedding_size)
             self.encoder.load_state_dict(encoder_checkpoint[STATE_DICT])
-            #self.encoder.load_state_dict(torch.load(self.encoder_file))
-            #self.encoder_optimizer = optim.SGD(self.encoder.parameters(), lr=learning_rate)
-            #self.encoder_optimizer.load_state_dict(encoder_checkpoint[OPTIMIZER])
+            if encoder_checkpoint[OPTIMIZER_TYPE] == 'adam':
+                self.encoder_optimizer = optim.Adam(self.encoder.parameters(), lr=self.learning_rate)
+                self.optimizer_type = 'adam'
+            elif encoder_checkpoint[OPTIMIZER_TYPE] == 'sgd':
+                self.encoder_optimizer = optim.SGD(self.encoder.parameters(), lr=self.learning_rate)
+                self.optimizer_type = 'sgd'
+            self.encoder_optimizer.load_state_dict(encoder_checkpoint[OPTIMIZER])
             
+            # Load decoder
             self.decoder = DecoderRNN(self.book.n_words, self.hidden_size, self.embedding_size, self.max_length)
             self.decoder.load_state_dict(decoder_checkpoint[STATE_DICT])
-            #self.decoder_optimizer = optim.SGD(self.decoder.parameters(), lr=learning_rate)
-            #self.decoder_optimizer.load_state_dict(decoder_checkpoint[OPTIMIZER])
+            if decoder_checkpoint[OPTIMIZER_TYPE] == 'adam':
+                self.decoder_optimizer = optim.Adam(self.decoder.parameters(), lr=self.learning_rate)
+                self.optimizer_type = 'adam'
+            elif decoder_checkpoint[OPTIMIZER_TYPE] == 'sgd':
+                self.decoder_optimizer = optim.SGD(self.decoder.parameters(), lr=self.learning_rate)
+                self.optimizer_type = 'sgd'
+            self.decoder_optimizer.load_state_dict(decoder_checkpoint[OPTIMIZER])
 
+            # Load context encoder
             self.context = ContextRNN(self.book.n_words, self.hidden_size, self.embedding_size)
             self.context.load_state_dict(context_checkpoint[STATE_DICT])
+            if context_checkpoint[OPTIMIZER_TYPE] == 'adam':
+                self.context_optimizer = optim.Adam(self.context.parameters(), lr=self.learning_rate)
+                self.optimizer_type = 'adam'
+            elif context_checkpoint[OPTIMIZER_TYPE] == 'sgd':
+                self.context_optimizer = optim.SGD(self.context.parameters(), lr=self.learning_rate)
+                self.optimizer_type = 'sgd'
+            self.context_optimizer.load_state_dict(context_checkpoint[OPTIMIZER])
+            self.context_hidden = torch.load(context_checkpoint[CONTEXT_HIDDEN])
 
             if USE_CUDA:
                 self.encoder = self.encoder.cuda()
                 self.decoder = self.decoder.cuda()
                 self.context = self.context.cuda()
+                self.context_hidden = self.context_hidden.cuda()
 
             return True
         return False
@@ -259,16 +247,20 @@ class Hred(object):
 
         encoder_state = {
             STATE_DICT: self.encoder.state_dict(),
-            #OPTIMIZER: self.encoder_optimizer.state_dict()
+            OPTIMIZER: self.encoder_optimizer.state_dict(),
+            OPTIMIZER_TYPE: self.optimizer_type
         }
         decoder_state = {
             STATE_DICT: self.decoder.state_dict(),
-            #OPTIMIZER: self.decoder_optimizer.state_dict()
+            OPTIMIZER: self.decoder_optimizer.state_dict(),
+            OPTIMIZER_TYPE: self.optimizer_type
         }
 
         context_state = {
             STATE_DICT: self.context.state_dict(),
-            #OPTIMIZER: self.decoder_optimizer.state_dict()
+            OPTIMIZER: self.context_optimizer.state_dict(),
+            OPTIMIZER_TYPE: self.optimizer_type,
+            CONTEXT_HIDDEN: self.context_hidden
         }
 
         torch.save(encoder_state, encoder_file)
@@ -283,9 +275,6 @@ class Hred(object):
         
         encoder_hidden = encoder_model.initHidden()
 
-        #encoder_optimizer.zero_grad()
-        #decoder_optimizer.zero_grad()
-
         input_length = input_variable.size()[0]
         target_length = target_variable.size()[0]
 
@@ -293,7 +282,6 @@ class Hred(object):
         if USE_CUDA:
             encoder_outputs = encoder_outputs.cuda()
 
-        # TODO: What is the point of calculating this if it's only returned on 'last'? There must be a different way
         loss = 0
 
         # Encode the input sentence
@@ -304,7 +292,7 @@ class Hred(object):
             else:
                 print(f'Somehow we got ei={ei} for range({input_length}) where max_length={self.max_length}')
 
-        # NOTE: my method (incorrect?)
+        # NOTE: my method ()
         
         # The "sentence vector" is the hidden state obtained after the last token of the sentence has been processed
         # encoder_hidden = sentence_vector
@@ -328,21 +316,6 @@ class Hred(object):
         
         ## End my method
 
-        # NOTE: hred.py method
-        '''
-        decoder_input = Variable(torch.LongTensor([[START_ID]]))
-        if USE_CUDA:
-            decoder_input = decoder_input.cuda()
-        
-        decoder_hidden = encoder_hidden # NOTE: I don't think we have any direct interaction between the encoder and decoder
-
-        # Calculate context
-        context_output, context_hidden = context_model(encoder_output, context_input) 
-        # It doesn't seem that the encoder output is used for anything, rather its hidden state is sent to context RNN
-        '''
-        ## End hred.p method
-        
-
         use_teacher_forcing = True if random.random() < self.teacher_forcing_ratio else False
 
         if use_teacher_forcing:
@@ -364,10 +337,6 @@ class Hred(object):
                     decoder_input, decoder_hidden, encoder_outputs, context_hidden)
                 topv, topi = decoder_output.topk(1)
 
-                # from hred project:
-                #ni = topi[0][0] 
-                #decoder_input = Variable(torch.LongTensor([[ni]]))
-
                 # from seq2seq project, .detach() is NECESSARY for loss.backward() (?)
                 decoder_input = topi.squeeze().detach() # detach from history as input
                 #print(f'dec_inp before Variable: {decoder_input}')
@@ -378,11 +347,7 @@ class Hred(object):
                     decoder_input = decoder_input.cuda()
 
                 if last:
-                    #loss += criterion(decoder_output[0], target_variable[di]) #NOTE: this is how it is in other project?
                     loss += criterion(decoder_output, target_variable[di]) # previous project
-                    #print(f'decoder_output: {decoder_output}')
-                    #print(f'target_variable[{di}]: {target_variable[di]}')
-                #if ni == STOP_ID:
                 if decoder_input.item() == STOP_ID:
                     break
 
@@ -559,7 +524,24 @@ class Hred(object):
                 self.encoder = EncoderRNN(self.book.n_words, self.hidden_size, self.embedding_size)#.to(self.device)
                 self.decoder = DecoderRNN(self.book.n_words, self.hidden_size, self.embedding_size, self.max_length)#.to(self.device)
                 self.context = ContextRNN(self.book.n_words, self.hidden_size, self.embedding_size)
+                if USE_CUDA:
+                    self.encoder = self.encoder.cuda()
+                    self.decoder = self.decoder.cuda()
+                    self.context = self.context.cuda()
 
+                if self.optimizer_type == 'adam':
+                    self.encoder_optimizer = optim.Adam(self.encoder.parameters(), lr=self.learning_rate)
+                    self.decoder_optimizer = optim.Adam(self.decoder.parameters(), lr=self.learning_rate)
+                    self.context_optimizer = optim.Adam(self.context.parameters(), lr=self.learning_rate)
+                elif self.optimizer_type == 'sgd':
+                    self.encoder_optimizer = optim.SGD(self.encoder.parameters(), lr=self.learning_rate)
+                    self.decoder_optimizer = optim.SGD(self.decoder.parameters(), lr=self.learning_rate)
+                    self.context_optimizer = optim.SGD(self.context.parameters(), lr=self.learning_rate)
+                
+                self.context_hidden = self.context.initHidden()
+                self.context_optimizer.zero_grad()
+                self.encoder_optimizer.zero_grad()
+                self.decoder_optimizer.zero_grad()
         
         # Create the GloVe embedding's weight matrix:
         if embedding_type is not None:
@@ -596,12 +578,6 @@ class Hred(object):
         print_loss_total = 0  # Reset every print_every
         plot_loss_total = 0  # Reset every plot_every
 
-        # NOTE: Originally optim.SGD
-        # Have tested using optim.Adam
-        encoder_optimizer = optim.SGD(self.encoder.parameters(), lr=self.learning_rate)
-        decoder_optimizer = optim.SGD(self.decoder.parameters(), lr=self.learning_rate)
-        context_optimizer = optim.SGD(self.context.parameters(), lr=self.learning_rate)
-        
         criterion = nn.NLLLoss()
 
         # NOTE: train/validation paragraphs data calculated in main file
@@ -616,11 +592,6 @@ class Hred(object):
         #validation_pairs = train_paragraphs[:int(len(training_paragraphs)*validation_size)]
         
         #random.shuffle(training_paragraphs) # shuffle the train pairs
-        
-        context_hidden = self.context.initHidden()
-        context_optimizer.zero_grad()
-        encoder_optimizer.zero_grad()
-        decoder_optimizer.zero_grad()
 
         iter = 0
         # Iterate through the training set over a set amount of epochs
@@ -638,9 +609,9 @@ class Hred(object):
                 iter += 1
                 #train_variables = variablesFromParagraph(self.book, train_paragraph)
                 #loss = 0
-                loss, context_hidden = self._train_paragraph(train_paragraph,
+                loss, self.context_hidden = self._train_paragraph(train_paragraph,
                     self.encoder, self.decoder, self.context,
-                    context_hidden, encoder_optimizer, decoder_optimizer, context_optimizer, criterion)
+                    self.context_hidden, self.encoder_optimizer, self.decoder_optimizer, self.context_optimizer, criterion)
                 #print(f'train_model: loss: {loss}')
 
                 loss_avg += loss
@@ -682,13 +653,13 @@ class Hred(object):
                 validation_loss_avg = 0
                 for j, validation_paragraph in enumerate(validation_paragraphs):
                     # Create copies
-                    encoder_optimizer_copy = copy.deepcopy(encoder_optimizer)
-                    decoder_optimizer_copy = copy.deepcopy(decoder_optimizer)
-                    context_optimizer_copy = copy.deepcopy(context_optimizer)
+                    encoder_optimizer_copy = copy.deepcopy(self.encoder_optimizer)
+                    decoder_optimizer_copy = copy.deepcopy(self.decoder_optimizer)
+                    context_optimizer_copy = copy.deepcopy(self.context_optimizer)
                     encoder_copy = copy.deepcopy(self.encoder)
                     decoder_copy = copy.deepcopy(self.decoder)
                     context_copy = copy.deepcopy(self.context)
-                    context_hidden_copy = copy.deepcopy(context_hidden)
+                    context_hidden_copy = copy.deepcopy(self.context_hidden)
                     criterion_copy = copy.deepcopy(criterion)
                     
                     loss, _ = self._train_paragraph(validation_paragraph,
@@ -742,6 +713,7 @@ class Hred(object):
             self.log.debug(logfile, 'Average validation loss={:.4f}'.format(float(sum([item[1] for item in validation_loss_avgs])) / len(validation_loss_avgs)))
         plt.plot([item[0] for item in loss_avgs], [item[1] for item in loss_avgs], label='Training')
         plt.plot([item[0] for item in validation_loss_avgs], [item[1] for item in validation_loss_avgs], label='Validation')
+        #plt.set_title(f'Loss after {epochs} epochs, embedding: {self.embedding_type}, optimizer: {self.optimizer_type}')
         plt.legend()
         plt.xlabel('Epoch')
         plt.ylabel('Loss')

@@ -1,5 +1,5 @@
 import getopt, pickle, sys
-from storygen.hred import Hred
+from storygen.hred import Hred, OPTIMIZER_TYPES
 from storygen.book import Book
 from storygen.glove import DIMENSION_SIZES
 from storygen.log import Log
@@ -19,6 +19,7 @@ HELP_MSG = '\n'.join([
 		'\t-h, --help: Provides help on command line parameters',
 		'\t--epoch <epoch_value>: specify an epoch value to train the model for or load a checkpoint from',
 		'\t--embedding <embedding_type>: specify an embedding to use from: [glove, cbow, sg]',
+        '\t--optim <optimizer_type>: specity the type of optimizer to use from: [adam, sgd]',
 		'\t--loss <loss_dir>: specify a directory to load loss values from (requires files loss.dat and validation.dat)',
 		'\t-u, --update: specify that if previous train/test pairs exists, overwrite them with re-parsed data'])
 
@@ -40,7 +41,7 @@ def main(argv):
 
     # Get command line arguments
     try:
-        opts, _ = getopt.getopt(argv, 'hu', ['epoch=', 'embedding=', 'loss=', 'help', 'update'])
+        opts, _ = getopt.getopt(argv, 'hu', ['epoch=', 'embedding=', 'optim=', 'optimizer=', 'loss=', 'help', 'update'])
     except getopt.GetoptError as e:
         print(e)
         print(HELP_MSG)
@@ -49,6 +50,7 @@ def main(argv):
     # Default values
     epoch_size = 100
     embedding_type = None
+    optimizer_type = None
     loss_dir = None
     load_previous = True
 
@@ -67,6 +69,13 @@ def main(argv):
         # The type of embedding to use
         elif opt == '--embedding':
             embedding_type = arg
+        # The type of optimizer to use
+        elif opt in ['--optim', '--optimizer']:
+            if arg not in OPTIMIZER_TYPES:
+                print(f'{arg} is not a correct optimizer type. Types are: {OPTIMIZER_TYPES}')
+                exit()
+            else:
+                optimizer_type = arg
         # Directory to load previous loss values from
         elif opt == '--loss':
             loss_dir = arg
@@ -105,6 +114,7 @@ def main(argv):
             hidden_size=HIDDEN_SIZE,
             max_length=MAX_LENGTH,
             embedding_size=EMBEDDING_SIZE,
+            optimizer_type=optimizer_type,
             book=book
     )
             #encoder_file='encoder_5.model',
