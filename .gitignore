@@ -18,6 +18,9 @@ __pycache__/
 launch.json
 .vscode/
 
+# virtualenv
+venv/
+
 # etc
 *.pkl
 *.png
