@@ -22,22 +22,26 @@ from storygen.context_encoder import ContextRNN
 
 USE_CUDA = torch.cuda.is_available()
 
-# Filename format: obj{_embedding-type}/{encoder or decoder}_{epoch-size}_{embedding-size}_{hidden-size}_{max-length}.torch
-ENCODER_FILE_FORMAT = '{}/encoder_{}_{}_{}_{}.torch'
-DECODER_FILE_FORMAT = '{}/decoder_{}_{}_{}_{}.torch'
-CONTEXT_FILE_FORMAT = '{}/context_{}_{}_{}_{}.torch'
+#ENCODER_FILE_FORMAT = '{}/encoder_{}_{}_{}_{}.torch'
+#DECODER_FILE_FORMAT = '{}/decoder_{}_{}_{}_{}.torch'
+#CONTEXT_FILE_FORMAT = '{}/context_{}_{}_{}_{}.torch'
+CHECKPOINT_FILE_FORMAT = '{}/model_{}_{}_{}_{}.torch'
 
-CHECKPOINT_FORMAT = '{}_(\d+)_{}_{}_{}.torch'
+CHECKPOINT_FORMAT = 'model_(\d+)_{}_{}_{}.torch'
 CHECKPOINT_DIR = 'obj'
 
 LOSS_FILE_FORMAT = '{}loss.dat'
 VALIDATION_LOSS_FILE_FORMAT = '{}validation.dat'
 
 # State dicts fields
-STATE_DICT = 'state_dict'
-OPTIMIZER = 'optimizer'
-OPTIMIZER_TYPE = 'optimizer_type'
-CONTEXT_HIDDEN = 'context_hidden'
+ENCODER_STATE_DICT = 'encoder_state_dict'
+DECODER_STATE_DICT = 'decoder_state_dict'
+CONTEXT_STATE_DICT = 'context_state_dict'
+ENCODER_OPTIMIZER  = 'encoder_optimizer'
+DECODER_OPTIMIZER  = 'decoder_optimizer'
+CONTEXT_OPTIMIZER  = 'context_optimizer'
+OPTIMIZER_TYPE     = 'optimizer_type'
+CONTEXT_HIDDEN     = 'context_hidden'
 
 OPTIMIZER_TYPES = ['adam', 'sgd']
 
@@ -141,7 +145,7 @@ class Hred(object):
             context_layers = 1,
             attention_layers = 1,
             decoder_layers = 1,
-            learning_rate = 0.0001
+            learning_rate = 0.01#0.0001
             ):
         # Original parameters
         self.book = book
@@ -175,56 +179,58 @@ class Hred(object):
         #self.i = 0
         #self.j = 0
 
-    def loadFromFiles(self, encoder_filename, decoder_filename, context_filename):
+    def loadFromFiles(self, checkpoint_filename):#encoder_filename, decoder_filename, context_filename):
         # Check that the path for both files exists
-        os.makedirs(os.path.dirname(encoder_filename), exist_ok=True)
-        os.makedirs(os.path.dirname(decoder_filename), exist_ok=True)
-        os.makedirs(os.path.dirname(context_filename), exist_ok=True)
+        #os.makedirs(os.path.dirname(encoder_filename), exist_ok=True)
+        #os.makedirs(os.path.dirname(decoder_filename), exist_ok=True)
+        #os.makedirs(os.path.dirname(context_filename), exist_ok=True)
+        os.makedirs(os.path.dirname(checkpoint_filename), exist_ok=True)
         
-        encoder_file = Path(encoder_filename)
-        decoder_file = Path(decoder_filename)
-        context_file = Path(context_filename)
+        #encoder_file = Path(encoder_filename)
+        #decoder_file = Path(decoder_filename)
+        #context_file = Path(context_filename)
+        checkpoint_file = Path(checkpoint_filename)
 
-        if encoder_file.is_file() and decoder_file.is_file() and context_file.is_file():
-            print("Loading encoder and decoder and context from files...")
+        #if encoder_file.is_file() and decoder_file.is_file() and context_file.is_file():
+        if checkpoint_file.is_file():
+            print("Loading model and context from files...")
             # TODO: modify this to save encoder/decoder into a single state
-            encoder_checkpoint = torch.load(encoder_file)
-            decoder_checkpoint = torch.load(decoder_file)
-            context_checkpoint = torch.load(context_file)
+            #encoder_checkpoint = torch.load(encoder_file)
+            #decoder_checkpoint = torch.load(decoder_file)
+            #context_checkpoint = torch.load(context_file)
+            checkpoint = torch.load(checkpoint_filename)
+
+            # Load optimizer type
+            self.optimizer_type = checkpoint[OPTIMIZER_TYPE]
 
             # Load encoder
             self.encoder = EncoderRNN(self.book.n_words, self.hidden_size, self.embedding_size)
-            self.encoder.load_state_dict(encoder_checkpoint[STATE_DICT])
-            if encoder_checkpoint[OPTIMIZER_TYPE] == 'adam':
+            self.encoder.load_state_dict(checkpoint[ENCODER_STATE_DICT])
+            if self.optimizer_type == 'adam':
                 self.encoder_optimizer = optim.Adam(self.encoder.parameters(), lr=self.learning_rate)
-                self.optimizer_type = 'adam'
-            elif encoder_checkpoint[OPTIMIZER_TYPE] == 'sgd':
+            elif self.optimizer_type == 'sgd':
                 self.encoder_optimizer = optim.SGD(self.encoder.parameters(), lr=self.learning_rate)
-                self.optimizer_type = 'sgd'
-            self.encoder_optimizer.load_state_dict(encoder_checkpoint[OPTIMIZER])
+            self.encoder_optimizer.load_state_dict(checkpoint[ENCODER_OPTIMIZER])
             
             # Load decoder
             self.decoder = DecoderRNN(self.book.n_words, self.hidden_size, self.embedding_size, self.max_length)
-            self.decoder.load_state_dict(decoder_checkpoint[STATE_DICT])
-            if decoder_checkpoint[OPTIMIZER_TYPE] == 'adam':
+            self.decoder.load_state_dict(checkpoint[DECODER_STATE_DICT])
+            if self.optimizer_type == 'adam':
                 self.decoder_optimizer = optim.Adam(self.decoder.parameters(), lr=self.learning_rate)
-                self.optimizer_type = 'adam'
-            elif decoder_checkpoint[OPTIMIZER_TYPE] == 'sgd':
+            elif self.optimizer_type == 'sgd':
                 self.decoder_optimizer = optim.SGD(self.decoder.parameters(), lr=self.learning_rate)
-                self.optimizer_type = 'sgd'
-            self.decoder_optimizer.load_state_dict(decoder_checkpoint[OPTIMIZER])
+            self.decoder_optimizer.load_state_dict(checkpoint[DECODER_OPTIMIZER])
 
             # Load context encoder
             self.context = ContextRNN(self.book.n_words, self.hidden_size, self.embedding_size)
-            self.context.load_state_dict(context_checkpoint[STATE_DICT])
-            if context_checkpoint[OPTIMIZER_TYPE] == 'adam':
+            self.context.load_state_dict(checkpoint[CONTEXT_STATE_DICT])
+            if self.optimizer_type == 'adam':
                 self.context_optimizer = optim.Adam(self.context.parameters(), lr=self.learning_rate)
-                self.optimizer_type = 'adam'
-            elif context_checkpoint[OPTIMIZER_TYPE] == 'sgd':
+            elif self.optimizer_type == 'sgd':
                 self.context_optimizer = optim.SGD(self.context.parameters(), lr=self.learning_rate)
-                self.optimizer_type = 'sgd'
-            self.context_optimizer.load_state_dict(context_checkpoint[OPTIMIZER])
-            self.context_hidden = torch.load(context_checkpoint[CONTEXT_HIDDEN])
+            self.context_optimizer.load_state_dict(checkpoint[CONTEXT_OPTIMIZER])
+
+            self.context_hidden = checkpoint[CONTEXT_HIDDEN]
 
             if USE_CUDA:
                 self.encoder = self.encoder.cuda()
@@ -235,20 +241,36 @@ class Hred(object):
             return True
         return False
 
-    def saveToFiles(self, encoder_filename, decoder_filename, context_filename):
+    def saveToFiles(self, checkpoint_filename):#encoder_filename, decoder_filename, context_filename):
         # Check that the path for both files exists
-        os.makedirs(os.path.dirname(encoder_filename), exist_ok=True)
-        os.makedirs(os.path.dirname(decoder_filename), exist_ok=True)
-        os.makedirs(os.path.dirname(context_filename), exist_ok=True)
+        #os.makedirs(os.path.dirname(encoder_filename), exist_ok=True)
+        #os.makedirs(os.path.dirname(decoder_filename), exist_ok=True)
+        #os.makedirs(os.path.dirname(context_filename), exist_ok=True)
+        os.makedirs(os.path.dirname(checkpoint_filename), exist_ok=True)
         
-        encoder_file = Path(encoder_filename)
-        decoder_file = Path(decoder_filename)
-        context_file = Path(context_filename)
+        #encoder_file = Path(encoder_filename)
+        #decoder_file = Path(decoder_filename)
+        #context_file = Path(context_filename)
+        checkpoint_file = Path(checkpoint_filename)
 
+        checkpoint_state = {
+            OPTIMIZER_TYPE: self.optimizer_type,
+            ENCODER_STATE_DICT: self.encoder.state_dict(),
+            ENCODER_OPTIMIZER: self.encoder_optimizer.state_dict(),
+            DECODER_STATE_DICT: self.decoder.state_dict(),
+            DECODER_OPTIMIZER: self.decoder_optimizer.state_dict(),
+            CONTEXT_STATE_DICT: self.context.state_dict(),
+            CONTEXT_OPTIMIZER: self.context_optimizer.state_dict(),
+            CONTEXT_HIDDEN: self.context_hidden
+        }
+
+        torch.save(checkpoint_state, checkpoint_file)
+        '''
         encoder_state = {
             STATE_DICT: self.encoder.state_dict(),
             OPTIMIZER: self.encoder_optimizer.state_dict(),
-            OPTIMIZER_TYPE: self.optimizer_type
+            OPTIMIZER_TYPE: self.optimizer_type,
+            
         }
         decoder_state = {
             STATE_DICT: self.decoder.state_dict(),
@@ -266,7 +288,7 @@ class Hred(object):
         torch.save(encoder_state, encoder_file)
         torch.save(decoder_state, decoder_file)
         torch.save(context_state, context_file)
-    
+        '''
     def _train(self, input_variable, target_variable,
             encoder_model, decoder_model, context_model,
             context_hidden, 
@@ -429,11 +451,16 @@ class Hred(object):
         self.log.info(logfile, 'Embedding type: {}'.format(embedding_type))
 
         # Check if any checkpoints for this model exist:
-        encoders = set()
-        decoders = set()
-        contexts = set()
+        #encoders = set()
+        #decoders = set()
+        #contexts = set()
+        checkpoints = set()
 
         for filename in os.listdir('{}/'.format(CHECKPOINT_DIR)):
+            checkpoint = re.search(CHECKPOINT_FORMAT.format(self.embedding_size, self.hidden_size, self.max_length), filename)
+            if checkpoint:
+                checkpoints.add(int(checkpoint.group(1)))
+            '''
             r_enc = re.search(CHECKPOINT_FORMAT.format('encoder', self.embedding_size, self.hidden_size, self.max_length), filename)
             if r_enc:
                 encoders.add(int(r_enc.group(1)))
@@ -445,8 +472,9 @@ class Hred(object):
                     r_con = re.search(CHECKPOINT_FORMAT.format('context', self.embedding_size, self.hidden_size, self.max_length), filename)
                     if r_con:
                         contexts.add(int(r_con.group(1)))
+            '''
         # A checkpoint needs a valid encoder and decoder 
-        checkpoints = encoders.intersection(decoders).intersection(contexts)
+        #checkpoints = encoders.intersection(decoders).intersection(contexts)
         
         print('Checkpoints found at: {}'.format(checkpoints))
         self.log.debug(logfile, 'Checkpoints found at: {}'.format(checkpoints))
@@ -476,11 +504,12 @@ class Hred(object):
             
             if start_epoch > 0:
                 # Load the encoder/decoder for the starting epoch checkpoint
-                encoder_filename = ENCODER_FILE_FORMAT.format(CHECKPOINT_DIR, start_epoch, self.embedding_size, self.hidden_size, self.max_length)
-                decoder_filename = DECODER_FILE_FORMAT.format(CHECKPOINT_DIR, start_epoch, self.embedding_size, self.hidden_size, self.max_length)
-                context_filename = CONTEXT_FILE_FORMAT.format(CHECKPOINT_DIR, start_epoch, self.embedding_size, self.hidden_size, self.max_length)
-                if self.loadFromFiles(encoder_filename, decoder_filename, context_filename):
-                    self.log.info(logfile, 'Loaded encoder/decoder from files at checkpoint {}'.format(start_epoch))
+                #encoder_filename = ENCODER_FILE_FORMAT.format(CHECKPOINT_DIR, start_epoch, self.embedding_size, self.hidden_size, self.max_length)
+                #decoder_filename = DECODER_FILE_FORMAT.format(CHECKPOINT_DIR, start_epoch, self.embedding_size, self.hidden_size, self.max_length)
+                #context_filename = CONTEXT_FILE_FORMAT.format(CHECKPOINT_DIR, start_epoch, self.embedding_size, self.hidden_size, self.max_length)
+                checkpoint_filename = CHECKPOINT_FILE_FORMAT.format(CHECKPOINT_DIR, start_epoch, self.embedding_size, self.hidden_size, self.max_length)
+                if self.loadFromFiles(checkpoint_filename):#encoder_filename, decoder_filename, context_filename):
+                    self.log.info(logfile, 'Loaded model from file at checkpoint {}'.format(start_epoch))
                 else:
                     self.log.error(logfile, 'Tried to load checkpoint encoder/decoder at epoch={}, but it failed!'.format(start_epoch))
                     print('Checkpoint loading error!')
@@ -539,6 +568,7 @@ class Hred(object):
                     self.context_optimizer = optim.SGD(self.context.parameters(), lr=self.learning_rate)
                 
                 self.context_hidden = self.context.initHidden()
+                print(f'opt type: {self.optimizer_type}')
                 self.context_optimizer.zero_grad()
                 self.encoder_optimizer.zero_grad()
                 self.decoder_optimizer.zero_grad()
@@ -675,26 +705,30 @@ class Hred(object):
             
             # Save a checkpoint
             if save_temp_models:
-                encoder_filename = ENCODER_FILE_FORMAT.format(CHECKPOINT_DIR, i+1, self.embedding_size, self.hidden_size, self.max_length)
-                decoder_filename = DECODER_FILE_FORMAT.format(CHECKPOINT_DIR, i+1, self.embedding_size, self.hidden_size, self.max_length)
-                context_filename = CONTEXT_FILE_FORMAT.format(CHECKPOINT_DIR, i+1, self.embedding_size, self.hidden_size, self.max_length)
-                encoder_file = Path(encoder_filename)
-                decoder_file = Path(decoder_filename)
-                context_file = Path(context_filename)
+                #encoder_filename = ENCODER_FILE_FORMAT.format(CHECKPOINT_DIR, i+1, self.embedding_size, self.hidden_size, self.max_length)
+                #decoder_filename = DECODER_FILE_FORMAT.format(CHECKPOINT_DIR, i+1, self.embedding_size, self.hidden_size, self.max_length)
+                #context_filename = CONTEXT_FILE_FORMAT.format(CHECKPOINT_DIR, i+1, self.embedding_size, self.hidden_size, self.max_length)
+                checkpoint_filename = CHECKPOINT_FILE_FORMAT.format(CHECKPOINT_DIR, i+1, self.embedding_size, self.hidden_size, self.max_length)
+                #encoder_file = Path(encoder_filename)
+                #decoder_file = Path(decoder_filename)
+                #context_file = Path(context_filename)
+                checkpoint_file = Path(checkpoint_filename)
                 # Save model at current epoch if doesn't exist
-                if not encoder_file.is_file() or not decoder_file.is_file() or not context_file.is_file():
+                if not checkpoint_file.is_file():#encoder_file.is_file() or not decoder_file.is_file() or not context_file.is_file():
                     self.log.debug(logfile, 'Saving temporary model at epoch={}'.format(i))
-                    self.saveToFiles(encoder_filename, decoder_filename, context_filename)
+                    self.saveToFiles(checkpoint_file)#encoder_filename, decoder_filename, context_filename)
                 # Delete second previous model if not a multiple of 10
                 if i > 1 and (i-1) % checkpoint_every != 0:
                     # Delete model with epoch = i-1
-                    encoder_file = Path(ENCODER_FILE_FORMAT.format(CHECKPOINT_DIR, i-1, self.embedding_size, self.hidden_size, self.max_length))
-                    decoder_file = Path(DECODER_FILE_FORMAT.format(CHECKPOINT_DIR, i-1, self.embedding_size, self.hidden_size, self.max_length))
-                    context_file = Path(CONTEXT_FILE_FORMAT.format(CHECKPOINT_DIR, i-1, self.embedding_size, self.hidden_size, self.max_length))
-                    if encoder_file.is_file() and decoder_file.is_file() and context_file.is_file():
-                        encoder_file.unlink()
-                        decoder_file.unlink()
-                        context_file.unlink()
+                    #encoder_file = Path(ENCODER_FILE_FORMAT.format(CHECKPOINT_DIR, i-1, self.embedding_size, self.hidden_size, self.max_length))
+                    #decoder_file = Path(DECODER_FILE_FORMAT.format(CHECKPOINT_DIR, i-1, self.embedding_size, self.hidden_size, self.max_length))
+                    #context_file = Path(CONTEXT_FILE_FORMAT.format(CHECKPOINT_DIR, i-1, self.embedding_size, self.hidden_size, self.max_length))
+                    checkpoint_file = Path(CHECKPOINT_FILE_FORMAT.format(CHECKPOINT_DIR, i+1, self.embedding_size, self.hidden_size, self.max_length))
+                    if checkpoint_file.is_file():#encoder_file.is_file() and decoder_file.is_file() and context_file.is_file():
+                        #encoder_file.unlink()
+                        #decoder_file.unlink()
+                        #context_file.unlink()
+                        checkpoint_file.unlink()
                         self.log.debug(logfile, 'Deleted temporary model at epoch={}'.format(i-1))
                     else:
                         self.log.error(logfile, 'Could not find temporary model at epoch={}'.format(i-1))
