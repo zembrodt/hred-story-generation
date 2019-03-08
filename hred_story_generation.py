@@ -1,4 +1,4 @@
-import getopt, pickle, sys
+import getopt, pickle, random, sys
 from storygen.hred import Hred, OPTIMIZER_TYPES
 from storygen.book import Book
 from storygen.glove import DIMENSION_SIZES
@@ -41,7 +41,7 @@ def main(argv):
 
     # Get command line arguments
     try:
-        opts, _ = getopt.getopt(argv, 'hu', ['epoch=', 'embedding=', 'optim=', 'optimizer=', 'loss=', 'help', 'update'])
+        opts, _ = getopt.getopt(argv, 'hu', ['epoch=', 'embedding=', 'optim=', 'optimizer=', 'loss=', 'largedata', 'help', 'update'])
     except getopt.GetoptError as e:
         print(e)
         print(HELP_MSG)
@@ -50,9 +50,10 @@ def main(argv):
     # Default values
     epoch_size = 100
     embedding_type = None
-    optimizer_type = None
+    optimizer_type = 'adam'
     loss_dir = None
     load_previous = True
+    large_data = False
 
     # Set values from command line
     for opt, arg in opts:
@@ -79,23 +80,35 @@ def main(argv):
         # Directory to load previous loss values from
         elif opt == '--loss':
             loss_dir = arg
+        # Use the large set of data (4 books instead of 1)
+        elif opt == '--largedata':
+            large_data = True
         # Flag to overwrite saved train/test pairs (if they exist)
         elif opt in ('-u', '--update'):
             load_previous = False
 
     print('Epoch size        = {}'.format(epoch_size))
     print('Embedding type    = {}'.format(embedding_type))
+    print('Optimizer type    = {}'.format(optimizer_type))
     print('Loss directory    = {}'.format(loss_dir))
     print('Hidden layer size = {}'.format(HIDDEN_SIZE))
 
     # prepare data
     train_paragraphs, validation_paragraphs, test_paragraphs = [], [], []
-    with open('data/train_raw.pkl', 'rb') as f:
-        train_paragraphs = pickle.load(f)
-    with open('data/validate_raw.pkl', 'rb') as f:
-        validation_paragraphs = pickle.load(f)
-    with open('data/test_raw.pkl', 'rb') as f:
-        test_paragraphs = pickle.load(f)
+    if large_data:
+        with open('data/train_raw_4.pkl', 'rb') as f:
+            train_paragraphs = pickle.load(f)
+        with open('data/validate_raw_4.pkl', 'rb') as f:
+            validation_paragraphs = pickle.load(f)
+        with open('data/test_raw_4.pkl', 'rb') as f:
+            test_paragraphs = pickle.load(f)
+    else:
+        with open('data/train_raw.pkl', 'rb') as f:
+            train_paragraphs = pickle.load(f)
+        with open('data/validate_raw.pkl', 'rb') as f:
+            validation_paragraphs = pickle.load(f)
+        with open('data/test_raw.pkl', 'rb') as f:
+            test_paragraphs = pickle.load(f)
 
     paragraphs = train_paragraphs + validation_paragraphs + test_paragraphs
 
@@ -123,17 +136,28 @@ def main(argv):
 
     print(f'Training for {epoch_size} epochs')
     hred.train_model(epoch_size, train_paragraphs, validation_paragraphs,
-            embedding_type=embedding_type, loss_dir=loss_dir, save_temp_models=True)
+            embedding_type=embedding_type, loss_dir=loss_dir, save_temp_models=True,
+            checkpoint_every=5)
 
     print('Training complete.')
 
     print(f'Evaluating {len(test_paragraphs)} paragraphs')
-    for test_paragraph in test_paragraphs:
+    evaluate_train_every = 15
+    for i, test_paragraph in enumerate(test_paragraphs):
         decoded_words, _ = hred._evaluate(test_paragraph)
         for sentence in test_paragraph[:-1]:
             log.info(logfile, f'> {" ".join(sentence)}')
         log.info(logfile, f'= {" ".join(test_paragraph[-1])}')
         log.info(logfile, f'< {" ".join(decoded_words)}')
+
+        if i % evaluate_train_every == 0:
+            # Evaluate a train paragraph
+            train_paragraph = random.choice(train_paragraphs)
+            decoded_words, _ = hred._evaluate(train_paragraph)
+            for sentence in train_paragraph[:-1]:
+                log.info(logfile, f'> {" ".join(sentence)}')
+            log.info(logfile, f'= {" ".join(train_paragraph[-1])}')
+            log.info(logfile, f'< {" ".join(decoded_words)}')
 
 if __name__=='__main__':
     main(sys.argv[1:])
