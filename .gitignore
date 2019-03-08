@@ -4,6 +4,7 @@ obj*/
 # Parsed data files
 data/glove.6B/
 data/*_parsed/
+data/*_pkl/
 
 # Output logs
 logs/

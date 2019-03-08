@@ -1,7 +1,7 @@
 # book.py
 import unicodedata
 from unidecode import unidecode
-from collections import Counter
+from collections import Counter, defaultdict
 import itertools
 import string
 import os
@@ -472,6 +472,7 @@ def convertLinesToParagraphs(lines):
                 paragraphs.append(curr_paragraph)
                 curr_paragraph = []
     print('convertLinesToPara: paragraphs: {}'.format(len(paragraphs)))
+
     return paragraphs
 
 # Called when book.py is executed directly
@@ -505,6 +506,35 @@ def main():
                 print('combined.txt built!')
             else:
                 print('{} is not a directory!'.format(arg))
+            exit()
+        elif sys.argv[1] == '--buildpkl':
+            arg = sys.argv[2]
+            if os.path.isdir(arg):
+                output_dir = arg if arg[-1] == '/' or arg[-1] == '\\' else arg + '/'
+                data_types = ['train', 'validate', 'test']
+                for data_type in data_types:
+                    print(f'Building {data_type} paragraphs...')
+                    paragraphs = []
+                    with open(f'{output_dir}{data_type}_raw.pkl', 'wb') as output_f:
+                        for data_file in os.listdir(arg):
+                            #print(f'Checking {data_file}')
+                            if re.match(f'{data_type}_raw_.+pkl', data_file):
+                                print(f'\tAdding {data_file} to {data_type}')
+                                with open(f'{output_dir}{data_file}', 'rb') as input_f:
+                                    paragraphs += pickle.load(input_f)
+                        print(f'Dumping {data_type} paragraphs')
+                        pickle.dump(paragraphs, output_f)
+            exit()
+        elif sys.argv[1] == '--analyzepkl':
+            arg = sys.argv[2]
+            print(f'arg: {arg}')
+            if os.path.isdir(arg):
+                output_dir = arg if arg[-1] == '/' or arg[-1] == '\\' else arg + '/'
+                data_types = ['train', 'validate', 'test']
+                for data_type in data_types:
+                    with open(f'{output_dir}{data_type}_raw.pkl', 'rb') as f:
+                        paragraphs = pickle.load(f)
+                        print(f'{data_type} paragraphs: {len(paragraphs)}')
             exit()
         elif sys.argv[1] == '--filter':
             stop_words = set(stopwords.words('english'))
@@ -581,9 +611,12 @@ def main():
         num_paragraphs = {}
         # Directory to store parsed files
         parsed_dir = '{}_parsed/'.format(arg[:-1] if arg[-1] == '/' or arg[-1] == '\\' else arg)
+        pkl_dir = '{}_pkl/'.format(arg[:-1] if arg[-1] == '/' or arg[-1] == '\\' else arg)
         os.makedirs(parsed_dir, exist_ok=True)
+        os.makedirs(pkl_dir, exist_ok=True)
         for book_file in os.listdir(arg):
             book_file_split = book_file.split('.')
+            pkl_filename = ''.join(book_file_split[:-1])
             parsed_filename = '.'.join(book_file_split[:-1]) + '_parsed.' + book_file_split[-1]
             # Get lines from file
             book_file_path = '{}{}'.format(arg if arg[-1] == '/' or arg[-1] == '\\' else arg+'/', book_file)
@@ -595,8 +628,19 @@ def main():
             for i, paragraph in enumerate(paragraphs):
                 paragraphs[i] = convertLinesToSentences(paragraph, contraction_dict)
 
+            # Print info on paragraph lengths
+            lens = defaultdict(int)
+            for i in range(len(paragraphs)):
+                lens[len(paragraphs[i])] += 1
+            print('main: Amount of paragraphs at each length:')
+            for l in sorted(lens.keys()):
+                print(f'{l}: {lens[l]}')
+
+            print(f'main: len total paragraphs: {len(paragraphs)}')
+            p_temp = [paragraph for paragraph in paragraphs if len(paragraph) >= PARAGRAPH_SIZE]
+            print(f'main: p_temp: {len(p_temp)}')
             paragraphs = [[sentence.split() for sentence in paragraph][:PARAGRAPH_SIZE] for paragraph in paragraphs if len(paragraph) >= PARAGRAPH_SIZE]
-            print('paragraphs[0]: {}'.format(paragraphs[0]))
+            print(f'main: len total paragraphs >= {PARAGRAPH_SIZE}: {len(paragraphs)}')
 
             # Combine into a single list and count
             wordcount = Counter(list(itertools.chain.from_iterable( \
@@ -607,9 +651,9 @@ def main():
             for word in wordcount:
                 dict_data.append((word, i))
                 i += 1
-            with open('word_summary.pkl', 'wb') as f:
+            with open(f'{pkl_dir}word_summary_{pkl_filename}.pkl', 'wb') as f:
                 pickle.dump(dict_data, f)
-            with open('word_summary.txt', 'w+') as f:
+            with open(f'{pkl_dir}word_summary_{pkl_filename}.txt', 'w+') as f:
                 for item in dict_data:
                     f.write(str(item)+'\n')
 
@@ -622,25 +666,30 @@ def main():
             validate_paragraphs = train_valid_paragraphs[train_size:]
             test_paragraphs = paragraphs[train_valid_size:]
 
-            with open('train_paragraphs.txt', 'w+') as f:
+            with open(f'{pkl_dir}train_paragraphs_{pkl_filename}.txt', 'w+') as f:
                 for p in train_paragraphs:
                     f.write(str(p) + '\n')
-            with open('validate_paragraphs.txt', 'w+') as f:
+            with open(f'{pkl_dir}validate_paragraphs_{pkl_filename}.txt', 'w+') as f:
                 for p in validate_paragraphs:
                     f.write(str(p) + '\n')
-            with open('test_paragraphs.txt', 'w+') as f:
+            with open(f'{pkl_dir}test_paragraphs_{pkl_filename}.txt', 'w+') as f:
                 for p in test_paragraphs:
                     f.write(str(p) + '\n')
 
-            with open('train_raw.pkl', 'wb') as f:
+            with open(f'{pkl_dir}train_raw_{pkl_filename}.pkl', 'wb') as f:
                 pickle.dump(train_paragraphs, f)
-            with open('validate_raw.pkl', 'wb') as f:
+            with open(f'{pkl_dir}validate_raw_{pkl_filename}.pkl', 'wb') as f:
                 pickle.dump(validate_paragraphs, f)
-            with open('test_raw.pkl', 'wb') as f:
+            with open(f'{pkl_dir}test_raw_{pkl_filename}.pkl', 'wb') as f:
                 pickle.dump(test_paragraphs, f)
+            
+            
+            # NOTE: ends here, we only want the .pkl files for now!
+            continue
+
+
 
             print('main: paragraphs: {}'.format(len(paragraphs)))
-            break
             #sentences = convertLinesToSentences(lines, contraction_dict)
             sentences = ['\n'.join(paragraph)+'\n\n' for paragraph in paragraphs if len(paragraph) > PARAGRAPH_SIZE]
             max_lengths[book_file] = max(map(len, [sentence.split() for sentence in sentences]))
