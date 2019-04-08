@@ -1,4 +1,4 @@
-import getopt, pickle, random, sys
+import getopt, pickle, random, sys, torch
 from storygen.hred import Hred, OPTIMIZER_TYPES
 from storygen.book import Book
 from storygen.glove import DIMENSION_SIZES
@@ -36,12 +36,13 @@ def get_book(book_title, paragraphs):
     return bk
 
 def main(argv):
+    global USE_CUDA
     log = Log()
     logfile = log.create('hred-story-generation')
 
     # Get command line arguments
     try:
-        opts, _ = getopt.getopt(argv, 'hu', ['epoch=', 'embedding=', 'optim=', 'optimizer=', 'loss=', 'largedata', 'help', 'update'])
+        opts, _ = getopt.getopt(argv, 'hu', ['cuda', 'epoch=', 'embedding=', 'optim=', 'optimizer=', 'loss=', 'largedata', 'help', 'update'])
     except getopt.GetoptError as e:
         print(e)
         print(HELP_MSG)
@@ -60,6 +61,9 @@ def main(argv):
         if opt in ('-h', '--help'):
             print(HELP_MSG)
             exit()
+        # Are we going to try and use cuda?
+        elif opt == '--cuda':
+            USE_CUDA = torch.cuda.is_available()
         # How many epochs to train for
         elif opt == '--epoch':
             try:
@@ -71,7 +75,7 @@ def main(argv):
         elif opt == '--embedding':
             embedding_type = arg
         # The type of optimizer to use
-        elif opt in ['--optim', '--optimizer']:
+        elif opt in ('--optim', '--optimizer'):
             if arg not in OPTIMIZER_TYPES:
                 print(f'{arg} is not a correct optimizer type. Types are: {OPTIMIZER_TYPES}')
                 exit()
@@ -128,7 +132,8 @@ def main(argv):
             max_length=MAX_LENGTH,
             embedding_size=EMBEDDING_SIZE,
             optimizer_type=optimizer_type,
-            book=book
+            book=book,
+            use_cuda=USE_CUDA
     )
             #encoder_file='encoder_5.model',
             #decoder_file='decoder_5.model',
@@ -137,7 +142,7 @@ def main(argv):
     print(f'Training for {epoch_size} epochs')
     hred.train_model(epoch_size, train_paragraphs, validation_paragraphs,
             embedding_type=embedding_type, loss_dir=loss_dir, save_temp_models=True,
-            checkpoint_every=5)
+            checkpoint_every=50)
 
     print('Training complete.')
 
