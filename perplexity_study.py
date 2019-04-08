@@ -13,10 +13,11 @@ OBJ_DIR = 'obj'
 EMBEDDING_TYPES = ['glove', 'sg', 'cbow']
 HELP_MSG = ''.join([
     'Usage:\n',
-    'python3 perplexity_study.py [-h, --help] [--embedding]\n',
+    'python3 perplexity_study.py [-h, --help] [-f, --file <checkpoint file>]\n',
     '\t-h, --help: Provides help on command line parameters\n',
-	'\t--embedding <embedding_type>: specify an embedding to use from: {}'.format(EMBEDDING_TYPES),
-    '\t--build <filename>: builds a graphical representation of several perplexity studies',
+    '\t-f, --file <checkpoint file>: Specify the checkpoint file to load the model from\n',
+	#'\t--embedding <embedding_type>: specify an embedding to use from: {}'.format(EMBEDDING_TYPES),
+    #'\t--build <filename>: builds a graphical representation of several perplexity studies',
 ])
 
 
@@ -82,7 +83,8 @@ def calculate_perplexities(network, words, paragraphs, sentences, sentences_by_l
 def main(argv):
     # Get command line arguments
     try:
-        opts, _ = getopt.getopt(argv, 'hf:', ['embedding=', 'build=', 'help', 'file='])
+        #opts, _ = getopt.getopt(argv, 'hf:', ['embedding=', 'build=', 'help', 'file='])
+        opts, _ = getopt.getopt(argv, 'hf:', ['help', 'file='])
     except getopt.GetoptError as e:
         print(e)
         print(HELP_MSG)
@@ -103,6 +105,8 @@ def main(argv):
             exit()
         if opt in ('-f', '--file'):
             checkpoint_filename = arg
+        # TODO: Re-implement?
+        '''
         elif opt == '--embedding':
             embedding_type = arg
             if embedding_type not in EMBEDDING_TYPES:
@@ -132,6 +136,7 @@ def main(argv):
             else:
                 print('{} is not a file'.format(arg))
                 exit(1)
+        '''
 
     print('Embedding type = {}'.format(embedding_type))
     logger.info(logfile, 'Embedding type = {}'.format(embedding_type))
