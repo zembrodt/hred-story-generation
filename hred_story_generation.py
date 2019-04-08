@@ -10,18 +10,20 @@ DATA_FILE_FORMAT = 'data/{}_{}_{}.txt'
 
 EMBEDDINGS = ['glove', 'cbow', 'sg']
 
+USE_CUDA = False
+
 # Help message for command line arguments
 # TODO: this may need to be updated
 HELP_MSG = '\n'.join([
 		'Usage:',
-		'python3 story_generation.py [-h, --help] [--epoch <epoch_value>] [--embedding <embedding_type>] [--loss <loss_dir>]',
+		'python3 hred_story_generation.py [-h, --help] [--epoch <epoch_value>] [--embedding <embedding_type>] [--loss <loss_dir>] [--optim, --optimizer <optimizer_type>], [--largedata]',
 		'\tAll command line arguments are optional, and any combination (beides -h) can be used',
 		'\t-h, --help: Provides help on command line parameters',
 		'\t--epoch <epoch_value>: specify an epoch value to train the model for or load a checkpoint from',
 		'\t--embedding <embedding_type>: specify an embedding to use from: [glove, cbow, sg]',
-        '\t--optim <optimizer_type>: specity the type of optimizer to use from: [adam, sgd]',
+        '\t--optim, --optimizer <optimizer_type>: specify the type of optimizer to use from: [adam, sgd]',
 		'\t--loss <loss_dir>: specify a directory to load loss values from (requires files loss.dat and validation.dat)',
-		'\t-u, --update: specify that if previous train/test pairs exists, overwrite them with re-parsed data'])
+        '\t--largedata: specifies to use a large dataset for training/testing (four books instead of one)'])
 
 
 # Creates a book object from the given train/test pairs
@@ -42,7 +44,7 @@ def main(argv):
 
     # Get command line arguments
     try:
-        opts, _ = getopt.getopt(argv, 'hu', ['cuda', 'epoch=', 'embedding=', 'optim=', 'optimizer=', 'loss=', 'largedata', 'help', 'update'])
+        opts, _ = getopt.getopt(argv, 'h', ['cuda', 'epoch=', 'embedding=', 'optim=', 'optimizer=', 'loss=', 'largedata', 'help'])
     except getopt.GetoptError as e:
         print(e)
         print(HELP_MSG)
@@ -53,7 +55,6 @@ def main(argv):
     embedding_type = None
     optimizer_type = 'adam'
     loss_dir = None
-    load_previous = True
     large_data = False
 
     # Set values from command line
@@ -62,6 +63,7 @@ def main(argv):
             print(HELP_MSG)
             exit()
         # Are we going to try and use cuda?
+        # TODO: currently not working
         elif opt == '--cuda':
             USE_CUDA = torch.cuda.is_available()
         # How many epochs to train for
@@ -87,9 +89,6 @@ def main(argv):
         # Use the large set of data (4 books instead of 1)
         elif opt == '--largedata':
             large_data = True
-        # Flag to overwrite saved train/test pairs (if they exist)
-        elif opt in ('-u', '--update'):
-            load_previous = False
 
     print('Epoch size        = {}'.format(epoch_size))
     print('Embedding type    = {}'.format(embedding_type))
@@ -127,7 +126,7 @@ def main(argv):
     book = get_book(book_title, paragraphs)    
 
     print('Creating HRED')
-    hred = Hred(#groups=paragraphs,
+    hred = Hred(
             hidden_size=HIDDEN_SIZE,
             max_length=MAX_LENGTH,
             embedding_size=EMBEDDING_SIZE,
@@ -135,9 +134,6 @@ def main(argv):
             book=book,
             use_cuda=USE_CUDA
     )
-            #encoder_file='encoder_5.model',
-            #decoder_file='decoder_5.model',
-            #context_file='context_5.model')
 
     print(f'Training for {epoch_size} epochs')
     hred.train_model(epoch_size, train_paragraphs, validation_paragraphs,
