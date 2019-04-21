@@ -4,8 +4,6 @@ import torch
 import torch.nn as nn
 from torch.autograd import Variable
 
-USE_CUDA = torch.cuda.is_available()
-
 ######################################################################
 # The Encoder
 # -----------
@@ -30,9 +28,5 @@ class EncoderRNN(nn.Module):
         output, hidden = self.gru(output, hidden)
         return output, hidden
 
-    def initHidden(self):
-        result = Variable(torch.zeros(1, 1, self.hidden_size))
-        if USE_CUDA:
-            return result.cuda()
-        else:
-            return result
+    def initHidden(self, device):
+        return torch.zeros(1, 1, self.hidden_size, device=device)

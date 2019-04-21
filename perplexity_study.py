@@ -180,11 +180,12 @@ def main(argv):
     # Create and load the model
     hred = Hred(
         hidden_size=storygen.HIDDEN_SIZE,
+        context_hidden_size=storygen.CONTEXT_HIDDEN_SIZE,
         max_length=MAX_LENGTH,
         embedding_size=storygen.EMBEDDING_SIZE,
         optimizer_type='sgd', # Currently hard-coded for SGD optimizers
         book=book,
-        use_cuda=storygen.USE_CUDA
+        device=storygen.DEVICE
     )
     if not hred.loadFromFiles(checkpoint_filename):
         print(f'Error loading checkpoint at {checkpoint_filename}')

@@ -3,8 +3,6 @@
 import torch, torch.nn as nn
 from torch.autograd import Variable
 
-USE_CUDA = torch.cuda.is_available()
-
 class ContextRNN(nn.Module):
     def __init__(self, output_size, hidden_size, embedding_size, n_layers=1):
         super(ContextRNN, self).__init__()
@@ -23,9 +21,5 @@ class ContextRNN(nn.Module):
             output, hidden = self.gru(output, hidden)
         return output, hidden
 
-    def initHidden(self):
-        result = Variable(torch.zeros(1, 1, self.hidden_size))
-        if USE_CUDA:
-            return result.cuda()
-        else:
-            return result
+    def initHidden(self, device):
+        return torch.zeros(1, 1, self.hidden_size, device=device)

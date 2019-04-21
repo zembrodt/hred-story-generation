@@ -4,13 +4,15 @@ from storygen.book import Book
 from storygen.glove import DIMENSION_SIZES
 from storygen.log import Log
 
-HIDDEN_SIZE = 256
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+# Hidden vector sizes taken from https://arxiv.org/abs/1507.02221
+HIDDEN_SIZE = 1000
+CONTEXT_HIDDEN_SIZE = 1500
 EMBEDDING_SIZE = DIMENSION_SIZES[-1]
 DATA_FILE_FORMAT = 'data/{}_{}_{}.txt'
 
 EMBEDDINGS = ['glove', 'cbow', 'sg']
-
-USE_CUDA = False
 
 # Help message for command line arguments
 # TODO: this may need to be updated
@@ -38,13 +40,12 @@ def get_book(book_title, paragraphs):
     return bk
 
 def main(argv):
-    global USE_CUDA
     log = Log()
     logfile = log.create('hred-story-generation')
 
     # Get command line arguments
     try:
-        opts, _ = getopt.getopt(argv, 'h', ['cuda', 'epoch=', 'embedding=', 'optim=', 'optimizer=', 'loss=', 'largedata', 'help'])
+        opts, _ = getopt.getopt(argv, 'h', ['epoch=', 'embedding=', 'optim=', 'optimizer=', 'loss=', 'largedata', 'help'])
     except getopt.GetoptError as e:
         print(e)
         print(HELP_MSG)
@@ -53,7 +54,7 @@ def main(argv):
     # Default values
     epoch_size = 100
     embedding_type = None
-    optimizer_type = 'adam'
+    optimizer_type = 'sgd'
     loss_dir = None
     large_data = False
 
@@ -62,10 +63,6 @@ def main(argv):
         if opt in ('-h', '--help'):
             print(HELP_MSG)
             exit()
-        # Are we going to try and use cuda?
-        # TODO: currently not working
-        elif opt == '--cuda':
-            USE_CUDA = torch.cuda.is_available()
         # How many epochs to train for
         elif opt == '--epoch':
             try:
@@ -90,11 +87,19 @@ def main(argv):
         elif opt == '--largedata':
             large_data = True
 
-    print('Epoch size        = {}'.format(epoch_size))
-    print('Embedding type    = {}'.format(embedding_type))
-    print('Optimizer type    = {}'.format(optimizer_type))
-    print('Loss directory    = {}'.format(loss_dir))
-    print('Hidden layer size = {}'.format(HIDDEN_SIZE))
+    print('Epoch size          = {}'.format(epoch_size))
+    print('Embedding type      = {}'.format(embedding_type))
+    print('Optimizer type      = {}'.format(optimizer_type))
+    print('Loss directory      = {}'.format(loss_dir))
+    print('Hidden layer size   = {}'.format(HIDDEN_SIZE))
+    print('Context hidden size = {}'.format(CONTEXT_HIDDEN_SIZE))
+
+    log.info(logfile, f'Epoch size          = {epoch_size}')
+    log.info(logfile, f'Embedding type      = {embedding_type}')
+    log.info(logfile, f'Optimizer type      = {optimizer_type}')
+    log.info(logfile, f'Loss directory      = {loss_dir}')
+    log.info(logfile, f'Hidden layer size   = {HIDDEN_SIZE}')
+    log.info(logfile, f'Context hidden size = {CONTEXT_HIDDEN_SIZE}')
 
     # prepare data
     train_paragraphs, validation_paragraphs, test_paragraphs = [], [], []
@@ -126,13 +131,9 @@ def main(argv):
     book = get_book(book_title, paragraphs)    
 
     print('Creating HRED')
-    hred = Hred(
-            hidden_size=HIDDEN_SIZE,
-            max_length=MAX_LENGTH,
-            embedding_size=EMBEDDING_SIZE,
-            optimizer_type=optimizer_type,
-            book=book,
-            use_cuda=USE_CUDA
+    hred = Hred(DEVICE, book, 
+            MAX_LENGTH, HIDDEN_SIZE, CONTEXT_HIDDEN_SIZE, 
+            EMBEDDING_SIZE, optimizer_type
     )
 
     print(f'Training for {epoch_size} epochs')

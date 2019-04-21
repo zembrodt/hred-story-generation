@@ -20,8 +20,6 @@ from storygen.encoder import EncoderRNN
 from storygen.decoder import DecoderRNN
 from storygen.context_encoder import ContextRNN
 
-USE_CUDA = torch.cuda.is_available()
-
 CHECKPOINT_FILE_FORMAT = '{}/model_{}_{}_{}_{}_{}.torch'
 
 CHECKPOINT_FORMAT = 'model_(\d+)_{}_{}_{}_{}.torch'
@@ -47,32 +45,19 @@ OPTIMIZER_TYPES = ['adam', 'sgd']
 def indexesFromSentence(book, sentence):
     return [book.word2index[word] for word in sentence]
 
-# Converts an index (integer) to a pytorch variable
-def variableFromIndex(index):
-    result = Variable(torch.LongTensor(index).view(-1, 1), requires_grad=False)
-    if USE_CUDA:
-        result = result.cuda()
-    return result
+# Converts an index (integer) to a pytorch tensor
+def tensorFromIndex(index, device):
+    return torch.tensor(index, dtype=torch.long, device=device).view(-1, 1)
 
-# Converts a sentence to a pytorch variable
-def variableFromSentence(book, sentence):
+# Converts a sentence to a pytorch tensor
+def tensorFromSentence(book, sentence, device):
     indexes = indexesFromSentence(book, sentence)
     indexes.append(STOP_ID)
-    result = Variable(torch.LongTensor(indexes).view(-1, 1), requires_grad=False)
-    if USE_CUDA:
-        result = result.cuda()
-    return result
+    return torch.tensor(indexes, dtype=torch.long, device=device).view(-1, 1)
 
-# Converts a pair of sentences into a pair of pytorch tensors
-def variableFromPair(pair, book):
-    input_variable = variableFromSentence(book, pair[0])
-    target_variable = variableFromSentence(book, pair[1])
-    return (input_variable, target_variable)
+def tensorsFromParagraph(book, paragraph, device):
+    return [tensorFromSentence(book, sentence, device) for sentence in paragraph]
 
-# Return variables from paragraph
-def variablesFromParagraph(book, paragraph):
-    variables = [variableFromSentence(book, sentence) for sentence in paragraph]
-    return variables
 
 # Calculates the BLEU score via NLTK
 def calculateBleu(candidate, reference, n_gram=2):
@@ -136,7 +121,7 @@ class BeamSearchResult:
 # a sentence-encoder RNN, context-encoder RNN, and a decoder RNN with 
 # attention weights
 class Hred(object):
-    def __init__(self, book, max_length, hidden_size, embedding_size, 
+    def __init__(self, device, book, max_length, hidden_size, context_hidden_size, embedding_size, 
             optimizer_type='adam',
             teacher_forcing_ratio=0.5,
             beam=5,
@@ -144,11 +129,11 @@ class Hred(object):
             attention_layers = 1,
             decoder_layers = 1,
             learning_rate = 0.0001,
-            use_cuda=False
             ):
         # Original parameters
         self.book = book
         self.hidden_size = hidden_size
+        self.context_hidden_size = context_hidden_size
         self.max_length = max_length
         self.embedding_size = embedding_size
 
@@ -157,6 +142,8 @@ class Hred(object):
         self.context = None
 
         self.context_hidden = None
+
+        self.device = device
 
         # New parameters
         self.teacher_forcing_ratio = teacher_forcing_ratio
@@ -187,7 +174,7 @@ class Hred(object):
             self.optimizer_type = checkpoint[OPTIMIZER_TYPE]
 
             # Load encoder
-            self.encoder = EncoderRNN(self.book.n_words, self.hidden_size, self.embedding_size)
+            self.encoder = EncoderRNN(self.book.n_words, self.hidden_size, self.embedding_size).to(self.device)
             self.encoder.load_state_dict(checkpoint[ENCODER_STATE_DICT])
             if self.optimizer_type == 'adam':
                 self.encoder_optimizer = optim.Adam(self.encoder.parameters(), lr=self.learning_rate)
@@ -196,7 +183,7 @@ class Hred(object):
             self.encoder_optimizer.load_state_dict(checkpoint[ENCODER_OPTIMIZER])
             
             # Load decoder
-            self.decoder = DecoderRNN(self.book.n_words, self.hidden_size, self.embedding_size, self.max_length)
+            self.decoder = DecoderRNN(self.book.n_words, self.hidden_size, self.embedding_size, self.max_length).to(self.device)
             self.decoder.load_state_dict(checkpoint[DECODER_STATE_DICT])
             if self.optimizer_type == 'adam':
                 self.decoder_optimizer = optim.Adam(self.decoder.parameters(), lr=self.learning_rate)
@@ -205,7 +192,7 @@ class Hred(object):
             self.decoder_optimizer.load_state_dict(checkpoint[DECODER_OPTIMIZER])
 
             # Load context encoder
-            self.context = ContextRNN(self.book.n_words, self.hidden_size, self.embedding_size)
+            self.context = ContextRNN(self.book.n_words, self.hidden_size, self.embedding_size).to(self.device)
             self.context.load_state_dict(checkpoint[CONTEXT_STATE_DICT])
             if self.optimizer_type == 'adam':
                 self.context_optimizer = optim.Adam(self.context.parameters(), lr=self.learning_rate)
@@ -213,13 +200,7 @@ class Hred(object):
                 self.context_optimizer = optim.SGD(self.context.parameters(), lr=self.learning_rate)
             self.context_optimizer.load_state_dict(checkpoint[CONTEXT_OPTIMIZER])
 
-            self.context_hidden = checkpoint[CONTEXT_HIDDEN]
-
-            if USE_CUDA:
-                self.encoder = self.encoder.cuda()
-                self.decoder = self.decoder.cuda()
-                self.context = self.context.cuda()
-                self.context_hidden = self.context_hidden.cuda()
+            self.context_hidden = checkpoint[CONTEXT_HIDDEN].to(self.device)
 
             return True
         return False
@@ -249,14 +230,12 @@ class Hred(object):
             encoder_optimizer, decoder_optimizer, 
             criterion, last):
         
-        encoder_hidden = encoder_model.initHidden()
+        encoder_hidden = encoder_model.initHidden(self.device)
 
         input_length = input_variable.size()[0]
         target_length = target_variable.size()[0]
 
-        encoder_outputs = Variable(torch.zeros(self.max_length, encoder_model.hidden_size))
-        if USE_CUDA:
-            encoder_outputs = encoder_outputs.cuda()
+        encoder_outputs = torch.zeros(self.max_length, encoder_model.hidden_size, device=self.device)
 
         loss = 0
 
@@ -282,11 +261,10 @@ class Hred(object):
         # The next sentence prediction is performed by means of a decoder RNN
         # Takes the hidden state of the context RNN and produces a probability distribution over the tokens in the next sentence
         # Its prediction is conditioned on the hidden state of the context RNN
-        decoder_input = Variable(torch.LongTensor([[START_ID]]))
-        if USE_CUDA:
-            decoder_input = decoder_input.cuda()
+        decoder_input = torch.tensor([[START_ID]], device=self.device)
 
-        decoder_hidden = context_output
+        # NOTE: should this be context_output or context_hidden
+        decoder_hidden = None #context_output
         
         ## End my method
 
@@ -313,12 +291,6 @@ class Hred(object):
 
                 # from seq2seq project, .detach() is NECESSARY for loss.backward() (?)
                 decoder_input = topi.squeeze().detach() # detach from history as input
-                #print(f'dec_inp before Variable: {decoder_input}')
-                decoder_input = Variable(decoder_input)
-                #print(f'dec_inp after Variable: {decoder_input}')
-
-                if USE_CUDA:
-                    decoder_input = decoder_input.cuda()
 
                 if last:
                     loss += criterion(decoder_output, target_variable[di]) # previous project
@@ -342,17 +314,17 @@ class Hred(object):
             encoder_optimizer, decoder_optimizer, context_optimizer,
             criterion):
         
-        variables = variablesFromParagraph(self.book, paragraph)
+        tensors = tensorsFromParagraph(self.book, paragraph, self.device)
 
         encoder_optimizer.zero_grad()
         decoder_optimizer.zero_grad()
         context_optimizer.zero_grad()
 
-        for i in range(len(variables)-1):
-            input_variable = variables[i]
-            target_variable = variables[i+1]
+        for i in range(len(tensors)-1):
+            input_variable = tensors[i]
+            target_variable = tensors[i+1]
             last = False
-            if i+1 == len(variables)-1:
+            if i+1 == len(tensors)-1:
                 last = True
             if last:
                 loss, context_hidden = self._train(input_variable, target_variable, encoder_model, decoder_model, context_model,
@@ -483,13 +455,9 @@ class Hred(object):
                             for item in validation_loss_avgs:
                                 f.write('{},{}\t'.format(item[0], item[1]))
             else:
-                self.encoder = EncoderRNN(self.book.n_words, self.hidden_size, self.embedding_size)#.to(self.device)
-                self.decoder = DecoderRNN(self.book.n_words, self.hidden_size, self.embedding_size, self.max_length)#.to(self.device)
-                self.context = ContextRNN(self.book.n_words, self.hidden_size, self.embedding_size)
-                if USE_CUDA:
-                    self.encoder = self.encoder.cuda()
-                    self.decoder = self.decoder.cuda()
-                    self.context = self.context.cuda()
+                self.encoder = EncoderRNN(self.book.n_words, self.hidden_size, self.embedding_size).to(self.device)
+                self.decoder = DecoderRNN(self.book.n_words, self.hidden_size, self.embedding_size, self.max_length).to(self.device)
+                self.context = ContextRNN(self.book.n_words, self.hidden_size, self.embedding_size).to(self.device)
 
                 if self.optimizer_type == 'adam':
                     self.encoder_optimizer = optim.Adam(self.encoder.parameters(), lr=self.learning_rate)
@@ -500,7 +468,7 @@ class Hred(object):
                     self.decoder_optimizer = optim.SGD(self.decoder.parameters(), lr=self.learning_rate)
                     self.context_optimizer = optim.SGD(self.context.parameters(), lr=self.learning_rate)
                 
-                self.context_hidden = self.context.initHidden()
+                self.context_hidden = self.context.initHidden(self.device)
                 print(f'opt type: {self.optimizer_type}')
                 self.context_optimizer.zero_grad()
                 self.encoder_optimizer.zero_grad()
@@ -522,9 +490,8 @@ class Hred(object):
                     # Create random vector of dimension 'embedding_size', scale=0.6 taken from tutorial
                     weights_matrix[idx] = np.random.normal(scale=0.6, size=(self.embedding_size, ))
             # Convert weights_matrix to a Tensor
-            weights_matrix = torch.tensor(weights_matrix)
-            if USE_CUDA:
-                weights_matrix = weights_matrix.cuda()
+            weights_matrix = torch.tensor(weights_matrix, device=self.device)
+
             print('We found {}/{} words in our GloVe words2vec dict!'.format(words_found, self.book.n_words))
             self.log.info(logfile, 'Found {}/{} words in the GloVe dict.'.format(words_found, self.book.n_words))
             # Set the embedding layer's state_dict for encoder and decoder
@@ -546,10 +513,9 @@ class Hred(object):
         # Iterate through the training set over a set amount of epochs
         # Output the progress and current loss value
         print(f'Training size: {len(train_paragraphs)}')
-        for i in range(start_epoch, epochs):
+        for i in range(start_epoch, epochs+1):
             print(f'Processing epoch {i}...')
             self.log.debug(logfile, 'Processing epoch {}'.format(i))
-            #training_group = variablesFromGroup(self.book, random.choice(self.groups))
 
             loss_avg = 0
             for j, train_paragraph in enumerate(train_paragraphs):
@@ -611,17 +577,17 @@ class Hred(object):
             # Save a checkpoint
             if save_temp_models:
                 checkpoint_filename = CHECKPOINT_FILE_FORMAT.format(
-                    CHECKPOINT_DIR, i+1, self.embedding_size, self.hidden_size, self.max_length, self.optimizer_type)
+                    CHECKPOINT_DIR, i, self.embedding_size, self.hidden_size, self.max_length, self.optimizer_type)
                 checkpoint_file = Path(checkpoint_filename)
                 # Save model at current epoch if doesn't exist
                 if not checkpoint_file.is_file():
                     self.log.debug(logfile, 'Saving temporary model at epoch={}'.format(i))
                     self.saveToFiles(checkpoint_file)
                 # Delete second previous model if not a multiple of 10
-                if i > 1 and (i-1) % checkpoint_every != 0:
+                if i > 0 and ((i-1) % checkpoint_every != 0 or (i-1) == 0):
                     # Delete model with epoch = i-1
                     checkpoint_file = Path(CHECKPOINT_FILE_FORMAT.format(
-                        CHECKPOINT_DIR, i+1, self.embedding_size, self.hidden_size, self.max_length, self.optimizer_type))
+                        CHECKPOINT_DIR, i-1, self.embedding_size, self.hidden_size, self.max_length, self.optimizer_type))
                     if checkpoint_file.is_file():
                         checkpoint_file.unlink()
                         self.log.debug(logfile, 'Deleted temporary model at epoch={}'.format(i-1))
@@ -663,21 +629,19 @@ class Hred(object):
         with torch.no_grad():
             decoded_words = []
             decoder_attentions = torch.zeros(self.max_length, self.max_length)
-            context_hidden = self.context.initHidden()
+            context_hidden = self.context.initHidden(self.device)
 
-            variables = variablesFromParagraph(self.book, paragraph)
+            tensors = tensorsFromParagraph(self.book, paragraph, self.device)
             
-            for i in range(len(variables)-1):
+            for i in range(len(tensors)-1):
                 last = False
-                if i+1 == len(variables)-1:
+                if i+1 == len(tensors)-1:
                     last = True
-                input_variable = variables[i]
+                input_variable = tensors[i]
                 input_length = input_variable.size()[0]
-                encoder_hidden = self.encoder.initHidden()
+                encoder_hidden = self.encoder.initHidden(self.device)
 
-                encoder_outputs = Variable(torch.zeros(self.max_length, self.encoder.hidden_size))
-                if USE_CUDA:
-                    encoder_outputs = encoder_outputs.cuda()
+                encoder_outputs = torch.zeros(self.max_length, self.encoder.hidden_size, device=self.device)
 
                 for ei in range(input_length):
                     if ei < self.max_length:
@@ -689,11 +653,9 @@ class Hred(object):
 
                 # Do we need to care that we don't decode the first pairs?
                 if last:
-                    target_variable = variables[i+1]
+                    target_variable = tensors[i+1]
 
-                    decoder_input = Variable(torch.LongTensor([[START_ID]]))  # SOS
-                    if USE_CUDA:
-                        decoder_input = decoder_input.cuda()
+                    decoder_input = torch.tensor([[START_ID]], device=self.device)  # SOS
 
                     decoder_hidden = context_output
 
@@ -719,19 +681,17 @@ class Hred(object):
     # Performs beam search on the data to find better scoring sentences (evaluate uses a "beam search" of k=1)
     def beam_search(self, paragraph, k):
         with torch.no_grad():
-            variables = variablesFromParagraph(self.book, paragraph)
+            tensors = tensorsFromParagraph(self.book, paragraph, self.device)
                 
-            for i in range(len(variables)-1):
+            for i in range(len(tensors)-1):
                 last = False
-                if i+1 == len(variables)-1:
+                if i+1 == len(tensors)-1:
                     last = True
-                input_variable = variables[i]
+                input_variable = tensors[i]
                 input_length = input_variable.size()[0]
-                encoder_hidden = self.encoder.initHidden()
+                encoder_hidden = self.encoder.initHidden(self.device)
 
-                encoder_outputs = Variable(torch.zeros(self.max_length, self.encoder.hidden_size))
-                if USE_CUDA:
-                    encoder_outputs = encoder_outputs.cuda()
+                encoder_outputs = torch.zeros(self.max_length, self.encoder.hidden_size, device=self.device)
 
                 for ei in range(input_length):
                     if ei < self.max_length:
@@ -743,11 +703,9 @@ class Hred(object):
 
                 # Do we need to care that we don't decode the first pairs?
                 if last:
-                    target_variable = variables[i+1]
+                    target_variable = tensors[i+1]
 
-                    decoder_input = Variable(torch.LongTensor([[START_ID]]))  # SOS
-                    if USE_CUDA:
-                        decoder_input = decoder_input.cuda()
+                    decoder_input = torch.tensor([[START_ID]], device=self.device)  # SOS
 
                     decoder_hidden = context_output
 
@@ -797,21 +755,19 @@ class Hred(object):
         with torch.no_grad():
             decoded_words = []
             decoder_attentions = torch.zeros(self.max_length, self.max_length)
-            context_hidden = self.context.initHidden()
+            context_hidden = self.context.initHidden(self.device)
 
-            variables = variablesFromParagraph(self.book, paragraph)
+            tensors = tensorsFromParagraph(self.book, paragraph, self.device)
 
-            for i in range(len(variables)-1):
+            for i in range(len(tensors)-1):
                 last = False
-                if i+1 == len(variables)-1:
+                if i+1 == len(tensors)-1:
                     last = True
-                input_variable = variables[i]
+                input_variable = tensors[i]
                 input_length = input_variable.size()[0]
-                encoder_hidden = self.encoder.initHidden()
+                encoder_hidden = self.encoder.initHidden(self.device)
 
-                encoder_outputs = Variable(torch.zeros(self.max_length, self.encoder.hidden_size))
-                if USE_CUDA:
-                    encoder_outputs = encoder_outputs.cuda()
+                encoder_outputs = torch.zeros(self.max_length, self.encoder.hidden_size, device=self.device)
 
                 for ei in range(input_length):
                     if ei < self.max_length:
@@ -824,11 +780,9 @@ class Hred(object):
 
                 # Do we need to care that we don't decode the first pairs?
                 if last:
-                    target_variable = variables[i+1]
+                    target_variable = tensors[i+1]
 
-                    decoder_input = Variable(torch.LongTensor([[START_ID]]))  # SOS
-                    if USE_CUDA:
-                        decoder_input = decoder_input.cuda()
+                    decoder_input = torch.tensor([[START_ID]], device=self.device)  # SOS
 
                     decoder_hidden = context_output
 
@@ -838,7 +792,7 @@ class Hred(object):
                     summation = 0.0
                     N = 0
 
-                    evaluate_variable = variableFromSentence(self.book, last_sentence)
+                    evaluate_variable = tensorFromSentence(self.book, last_sentence, self.deivce)
 
                     # Previous error here: TypeError: iteration over a 0-d tensor
                     try:
