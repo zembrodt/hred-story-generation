@@ -93,6 +93,7 @@ def main(argv):
     print('Loss directory      = {}'.format(loss_dir))
     print('Hidden layer size   = {}'.format(HIDDEN_SIZE))
     print('Context hidden size = {}'.format(CONTEXT_HIDDEN_SIZE))
+    print('Use large data      = {}'.format(large_data))
 
     log.info(logfile, f'Epoch size          = {epoch_size}')
     log.info(logfile, f'Embedding type      = {embedding_type}')
@@ -100,6 +101,7 @@ def main(argv):
     log.info(logfile, f'Loss directory      = {loss_dir}')
     log.info(logfile, f'Hidden layer size   = {HIDDEN_SIZE}')
     log.info(logfile, f'Context hidden size = {CONTEXT_HIDDEN_SIZE}')
+    log.info(logfile, f'Use large data      = {large_data}')
 
     # prepare data
     train_paragraphs, validation_paragraphs, test_paragraphs = [], [], []
@@ -119,6 +121,15 @@ def main(argv):
             test_paragraphs = pickle.load(f)
 
     paragraphs = train_paragraphs + validation_paragraphs + test_paragraphs
+
+    print(f'Train:      {len(train_paragraphs)}')
+    print(f'Validation: {len(validation_paragraphs)}')
+    print(f'Test:       {len(test_paragraphs)}')
+    print(f'Total:      {len(paragraphs)}')
+    log.info(logfile, f'Train:      {len(train_paragraphs)}')
+    log.info(logfile, f'Validation: {len(validation_paragraphs)}')
+    log.info(logfile, f'Test:       {len(test_paragraphs)}')
+    log.info(logfile, f'Total:      {len(paragraphs)}')
 
     MAX_LENGTH = max(
         max(map(len, [sentence for sentence in paragraph]))
