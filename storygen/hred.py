@@ -792,7 +792,7 @@ class Hred(object):
                     summation = 0.0
                     N = 0
 
-                    evaluate_variable = tensorFromSentence(self.book, last_sentence, self.deivce)
+                    evaluate_variable = tensorFromSentence(self.book, last_sentence, self.device)
 
                     # Previous error here: TypeError: iteration over a 0-d tensor
                     try:
@@ -821,7 +821,7 @@ class Hred(object):
                             # Decode the predicted word from the book 
                             decoded_words.append(self.book.index2word[topi.item()])
 
-                        decoder_input = Variable(torch.LongTensor([[evaluate_item]]))
+                        decoder_input = torch.tensor([[evaluate_item]], device=self.device)
 
                     perplexity = pow(math.e, -summation / N)# / N because the evaluate sentence is converted to a tensor where the last item will be STOP_ID
 
