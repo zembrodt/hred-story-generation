@@ -769,6 +769,8 @@ class Hred(object):
             decoder_attentions = torch.zeros(self.max_length, self.max_length)
             context_hidden = self.context.initHidden(self.device)
 
+            context_outputs = torch.zeros(self.max_context, self.context_hidden_size, device=self.device)
+
             tensors = tensorsFromParagraph(self.book, paragraph, self.device)
 
             for i in range(len(tensors)-1):
@@ -787,8 +789,9 @@ class Hred(object):
                         encoder_outputs[ei] = encoder_outputs[ei] + encoder_output[0][0]
 
                 # calculate context
-                context_output, context_hidden = self.context(context_hidden, encoder_hidden)
+                context_output, context_hidden = self.context(encoder_hidden, context_hidden)
 
+                context_outputs[i] = context_hidden
 
                 # Do we need to care that we don't decode the first pairs?
                 if last:
@@ -796,7 +799,7 @@ class Hred(object):
 
                     decoder_input = torch.tensor([[START_ID]], device=self.device)  # SOS
 
-                    decoder_hidden = context_output
+                    decoder_hidden = None
 
                     decoded_words = []
                     decoder_attentions = torch.zeros(self.max_length, self.max_length)
@@ -817,7 +820,7 @@ class Hred(object):
                         N += 1
 
                         decoder_output, decoder_hidden, decoder_attention = self.decoder(
-                            decoder_input, decoder_hidden, encoder_outputs, context_hidden)
+                            decoder_input, decoder_hidden, encoder_outputs, context_hidden, context_outputs)
                         
                         topv, topi = decoder_output.data.topk(1)
 
