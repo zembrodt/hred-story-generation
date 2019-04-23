@@ -121,8 +121,9 @@ class BeamSearchResult:
 # a sentence-encoder RNN, context-encoder RNN, and a decoder RNN with 
 # attention weights
 class Hred(object):
-    def __init__(self, device, book, max_length, hidden_size, context_hidden_size, embedding_size, 
+    def __init__(self, device, book, max_length, max_context, hidden_size, context_hidden_size, embedding_size, 
             optimizer_type='adam',
+            use_context_attention=False,
             teacher_forcing_ratio=0.5,
             beam=5,
             context_layers = 1,
@@ -135,6 +136,7 @@ class Hred(object):
         self.hidden_size = hidden_size
         self.context_hidden_size = context_hidden_size
         self.max_length = max_length
+        self.max_context = max_context
         self.embedding_size = embedding_size
 
         self.encoder = None
@@ -142,6 +144,7 @@ class Hred(object):
         self.context = None
 
         self.context_hidden = None
+        self.use_context_attention = use_context_attention
 
         self.device = device
 
@@ -183,7 +186,9 @@ class Hred(object):
             self.encoder_optimizer.load_state_dict(checkpoint[ENCODER_OPTIMIZER])
             
             # Load decoder
-            self.decoder = DecoderRNN(self.book.n_words, self.hidden_size, self.embedding_size, self.max_length).to(self.device)
+            self.decoder = DecoderRNN(self.book.n_words, self.hidden_size, self.context_hidden_size, 
+                                        self.embedding_size, self.max_length, self.max_context,
+                                        use_context_attention=self.use_context_attention).to(self.device)
             self.decoder.load_state_dict(checkpoint[DECODER_STATE_DICT])
             if self.optimizer_type == 'adam':
                 self.decoder_optimizer = optim.Adam(self.decoder.parameters(), lr=self.learning_rate)
@@ -192,7 +197,7 @@ class Hred(object):
             self.decoder_optimizer.load_state_dict(checkpoint[DECODER_OPTIMIZER])
 
             # Load context encoder
-            self.context = ContextRNN(self.book.n_words, self.hidden_size, self.embedding_size).to(self.device)
+            self.context = ContextRNN(self.book.n_words, self.hidden_size, self.context_hidden_size).to(self.device)
             self.context.load_state_dict(checkpoint[CONTEXT_STATE_DICT])
             if self.optimizer_type == 'adam':
                 self.context_optimizer = optim.Adam(self.context.parameters(), lr=self.learning_rate)
@@ -226,7 +231,7 @@ class Hred(object):
         
     def _train(self, input_variable, target_variable,
             encoder_model, decoder_model, context_model,
-            context_hidden, 
+            context_hidden, context_outputs,
             encoder_optimizer, decoder_optimizer, 
             criterion, last):
         
@@ -252,7 +257,7 @@ class Hred(object):
         # The "sentence vector" is the hidden state obtained after the last token of the sentence has been processed
         # encoder_hidden = sentence_vector
         # The Context RNN keeps track of past sentences by processing iteratively each sentence vector
-        context_output, context_hidden = context_model(context_hidden, encoder_hidden)
+        context_output, context_hidden = context_model(encoder_hidden, context_hidden)
         # After processing sentence S_n, the hidden state of the context RNN represents a summary of the sentences up to and
             # including sentence n, which is used to predict the next sentence S_n+1
         # This hidden state can be interpreted as the continuous-valued state of the dialogue system
@@ -263,8 +268,7 @@ class Hred(object):
         # Its prediction is conditioned on the hidden state of the context RNN
         decoder_input = torch.tensor([[START_ID]], device=self.device)
 
-        # NOTE: should this be context_output or context_hidden
-        decoder_hidden = None #context_output
+        decoder_hidden = None 
         
         ## End my method
 
@@ -274,7 +278,7 @@ class Hred(object):
             # Teacher forcing: Feed the target as the next input
             for di in range(target_length):
                 decoder_output, decoder_hidden, decoder_attention = decoder_model(
-                        decoder_input, decoder_hidden, encoder_outputs, context_hidden)
+                        decoder_input, decoder_hidden, encoder_outputs, context_hidden, context_outputs)
                 
                 if last:
                     #loss += criterion(decoder_output[0], target_variable[di]) #NOTE: this is how it is in other project?
@@ -286,7 +290,7 @@ class Hred(object):
             # Without teacher forcing: use its own predictions as the next input
             for di in range(target_length):
                 decoder_output, decoder_hidden, decoder_attention = decoder_model(
-                    decoder_input, decoder_hidden, encoder_outputs, context_hidden)
+                    decoder_input, decoder_hidden, encoder_outputs, context_hidden, context_outputs)
                 topv, topi = decoder_output.topk(1)
 
                 # from seq2seq project, .detach() is NECESSARY for loss.backward() (?)
@@ -320,6 +324,8 @@ class Hred(object):
         decoder_optimizer.zero_grad()
         context_optimizer.zero_grad()
 
+        context_outputs = torch.zeros(self.max_context, self.context_hidden_size, device=self.device)
+
         for i in range(len(tensors)-1):
             input_variable = tensors[i]
             target_variable = tensors[i+1]
@@ -328,7 +334,7 @@ class Hred(object):
                 last = True
             if last:
                 loss, context_hidden = self._train(input_variable, target_variable, encoder_model, decoder_model, context_model,
-                        context_hidden, encoder_optimizer, decoder_optimizer, criterion, last)
+                        context_hidden, context_outputs, encoder_optimizer, decoder_optimizer, criterion, last)
 
                 encoder_optimizer.step()
                 decoder_optimizer.step()
@@ -337,7 +343,8 @@ class Hred(object):
                 return loss, context_hidden
             else:
                 context_hidden = self._train(input_variable, target_variable, encoder_model, decoder_model, context_model,
-                        context_hidden, encoder_optimizer, decoder_optimizer, criterion, last)
+                        context_hidden, context_outputs, encoder_optimizer, decoder_optimizer, criterion, last)
+            context_outputs[i] = context_hidden
         print('We reached a part of training that should be unreachable! Empty paragraph perhaps?')
         print(f'Paragraph: {paragraph}')
         exit(1)
@@ -456,8 +463,10 @@ class Hred(object):
                                 f.write('{},{}\t'.format(item[0], item[1]))
             else:
                 self.encoder = EncoderRNN(self.book.n_words, self.hidden_size, self.embedding_size).to(self.device)
-                self.decoder = DecoderRNN(self.book.n_words, self.hidden_size, self.embedding_size, self.max_length).to(self.device)
-                self.context = ContextRNN(self.book.n_words, self.hidden_size, self.embedding_size).to(self.device)
+                self.decoder = DecoderRNN(self.book.n_words, self.hidden_size, self.context_hidden_size, 
+                                            self.embedding_size, self.max_length, self.max_context,
+                                            use_context_attention=self.use_context_attention).to(self.device)
+                self.context = ContextRNN(self.book.n_words, self.hidden_size, self.context_hidden_size).to(self.device)
 
                 if self.optimizer_type == 'adam':
                     self.encoder_optimizer = optim.Adam(self.encoder.parameters(), lr=self.learning_rate)
@@ -631,6 +640,8 @@ class Hred(object):
             decoder_attentions = torch.zeros(self.max_length, self.max_length)
             context_hidden = self.context.initHidden(self.device)
 
+            context_outputs = torch.zeros(self.max_context, self.context_hidden_size, device=self.device)
+
             tensors = tensorsFromParagraph(self.book, paragraph, self.device)
             
             for i in range(len(tensors)-1):
@@ -649,7 +660,8 @@ class Hred(object):
                         encoder_outputs[ei] = encoder_outputs[ei] + encoder_output[0][0]
 
                 # calculate context
-                context_output, context_hidden = self.context(context_hidden, encoder_hidden)
+                context_output, context_hidden = self.context(encoder_hidden, context_hidden)
+                context_outputs[i] = context_hidden
 
                 # Do we need to care that we don't decode the first pairs?
                 if last:
@@ -657,13 +669,13 @@ class Hred(object):
 
                     decoder_input = torch.tensor([[START_ID]], device=self.device)  # SOS
 
-                    decoder_hidden = context_output
+                    decoder_hidden = None
 
                     decoder_inputs = [decoder_input]
                     decoder_hiddens = [decoder_hidden]
                     for di in range(self.max_length):
                         decoder_output, decoder_hidden, decoder_attention = self.decoder(
-                            decoder_input, decoder_hidden, encoder_outputs, context_hidden)
+                            decoder_input, decoder_hidden, encoder_outputs, context_hidden, context_outputs)
                         
                         topv, topi = decoder_output.data.topk(1)
 

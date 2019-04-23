@@ -182,6 +182,7 @@ def main(argv):
         hidden_size=storygen.HIDDEN_SIZE,
         context_hidden_size=storygen.CONTEXT_HIDDEN_SIZE,
         max_length=MAX_LENGTH,
+        max_context=storygen.MAX_CONTEXT,
         embedding_size=storygen.EMBEDDING_SIZE,
         optimizer_type='sgd', # Currently hard-coded for SGD optimizers
         book=book,

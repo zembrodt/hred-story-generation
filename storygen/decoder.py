@@ -27,15 +27,16 @@ from torch.autograd import Variable
 # while shorter sentences will only use the first few.
 
 class DecoderRNN(nn.Module):
-    def __init__(self, output_size, hidden_size, embedding_size, max_length, dropout_p=0.1, use_context_attention=False):
+    def __init__(self, output_size, hidden_size, context_hidden_size, embedding_size, max_length, max_context, dropout_p=0.1, use_context_attention=False):
         print('decoder, max_len={}'.format(max_length))
         super(DecoderRNN, self).__init__()
         self.output_size = output_size
         self.hidden_size = hidden_size
+        self.context_hidden_size = context_hidden_size
         self.embedding_size = embedding_size
         self.dropout_p = dropout_p
         self.max_length = max_length
-        #self.device = device
+        self.max_context = max_context
 
         self.embedding = nn.Embedding(self.output_size, self.embedding_size)
         self.attn = nn.Linear(self.hidden_size + self.embedding_size, self.max_length)
@@ -43,17 +44,31 @@ class DecoderRNN(nn.Module):
         self.dropout = nn.Dropout(self.dropout_p)
 
         # Context attentions
-        #self.attn = nn.Linear()
+        self.use_context_attention = use_context_attention
+        self.context_attn = nn.Linear(self.context_hidden_size, self.max_context)
+        self.context_attn_combine = nn.Linear(self.context_hidden_size * 2, self.embedding_size)
 
-        #self.context_transform = nn.Linear(self.hidden_size + self.embedding_size, self.embedding_size)
+        self.hidden_transform = nn.Linear(self.context_hidden_size, self.hidden_size)
+
         self.gru = nn.GRU(self.embedding_size, self.hidden_size)
         self.out = nn.Linear(self.hidden_size, self.output_size)
 
-    def forward(self, input, hidden, encoder_outputs, context):
-
+    def forward(self, input, hidden, encoder_outputs, context, context_outputs):
         # Initial hidden state
         if hidden is None:
-            hidden = context
+            if self.use_context_attention:
+                context_attn_weights = F.softmax(
+                    self.context_attn(context[0]), dim=1
+                )
+                context_attn_applied = torch.bmm(context_attn_weights.unsqueeze(0),
+                                                 context_outputs.unsqueeze(0))
+                hidden = torch.cat((context[0], context_attn_applied[0]), 1)
+                hidden = self.context_attn_combine(hidden).unsqueeze(0)
+                hidden = F.relu(hidden)
+                hidden = self.hidden_transform(hidden)
+            else:
+                hidden = self.hidden_transform(context)
+
 
         embedded = self.embedding(input).view(1, 1, -1)
         embedded = self.dropout(embedded)

@@ -4,22 +4,17 @@ import torch, torch.nn as nn
 from torch.autograd import Variable
 
 class ContextRNN(nn.Module):
-    def __init__(self, output_size, hidden_size, embedding_size, n_layers=1):
+    def __init__(self, output_size, hidden_size, context_hidden_size):
         super(ContextRNN, self).__init__()
-        self.n_layers = n_layers
         self.hidden_size = hidden_size
-        self.embedding_size = embedding_size
+        self.context_hidden_size = context_hidden_size
 
-        #self.embedding = nn.Embedding(output_size, embedding_size)
-        self.gru = nn.GRU(hidden_size, hidden_size)
+        self.gru = nn.GRU(hidden_size, context_hidden_size)
 
     def forward(self, input, hidden):
-        #print input
-        #output = self.embedding(input).view(1, 1, -1)
         output = input.view(1,1,-1)
-        for i in range(self.n_layers):
-            output, hidden = self.gru(output, hidden)
+        output, hidden = self.gru(output, hidden)
         return output, hidden
 
     def initHidden(self, device):
-        return torch.zeros(1, 1, self.hidden_size, device=device)
+        return torch.zeros(1, 1, self.context_hidden_size, device=device)

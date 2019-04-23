@@ -9,6 +9,7 @@ DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # Hidden vector sizes taken from https://arxiv.org/abs/1507.02221
 HIDDEN_SIZE = 1000
 CONTEXT_HIDDEN_SIZE = 1500
+MAX_CONTEXT = 5
 EMBEDDING_SIZE = DIMENSION_SIZES[-1]
 DATA_FILE_FORMAT = 'data/{}_{}_{}.txt'
 
@@ -45,7 +46,7 @@ def main(argv):
 
     # Get command line arguments
     try:
-        opts, _ = getopt.getopt(argv, 'h', ['epoch=', 'embedding=', 'optim=', 'optimizer=', 'loss=', 'largedata', 'help'])
+        opts, _ = getopt.getopt(argv, 'h', ['epoch=', 'embedding=', 'optim=', 'optimizer=', 'loss=', 'largedata', 'ca', 'help'])
     except getopt.GetoptError as e:
         print(e)
         print(HELP_MSG)
@@ -57,6 +58,7 @@ def main(argv):
     optimizer_type = 'sgd'
     loss_dir = None
     large_data = False
+    use_context_attention = False
 
     # Set values from command line
     for opt, arg in opts:
@@ -86,22 +88,27 @@ def main(argv):
         # Use the large set of data (4 books instead of 1)
         elif opt == '--largedata':
             large_data = True
+        elif opt == '--ca':
+            use_context_attention = True
 
-    print('Epoch size          = {}'.format(epoch_size))
-    print('Embedding type      = {}'.format(embedding_type))
-    print('Optimizer type      = {}'.format(optimizer_type))
-    print('Loss directory      = {}'.format(loss_dir))
-    print('Hidden layer size   = {}'.format(HIDDEN_SIZE))
-    print('Context hidden size = {}'.format(CONTEXT_HIDDEN_SIZE))
-    print('Use large data      = {}'.format(large_data))
+    print('Epoch size            = {}'.format(epoch_size))
+    print('Embedding type        = {}'.format(embedding_type))
+    print('Optimizer type        = {}'.format(optimizer_type))
+    print('Loss directory        = {}'.format(loss_dir))
+    print('Hidden layer size     = {}'.format(HIDDEN_SIZE))
+    print('Context hidden size   = {}'.format(CONTEXT_HIDDEN_SIZE))
+    print('Use large data        = {}'.format(large_data))
+    print('Use context attention = {}'.format(use_context_attention))
+    print(f'Log dir               = {log.dir}')
 
-    log.info(logfile, f'Epoch size          = {epoch_size}')
-    log.info(logfile, f'Embedding type      = {embedding_type}')
-    log.info(logfile, f'Optimizer type      = {optimizer_type}')
-    log.info(logfile, f'Loss directory      = {loss_dir}')
-    log.info(logfile, f'Hidden layer size   = {HIDDEN_SIZE}')
-    log.info(logfile, f'Context hidden size = {CONTEXT_HIDDEN_SIZE}')
-    log.info(logfile, f'Use large data      = {large_data}')
+    log.info(logfile, f'Epoch size            = {epoch_size}')
+    log.info(logfile, f'Embedding type        = {embedding_type}')
+    log.info(logfile, f'Optimizer type        = {optimizer_type}')
+    log.info(logfile, f'Loss directory        = {loss_dir}')
+    log.info(logfile, f'Hidden layer size     = {HIDDEN_SIZE}')
+    log.info(logfile, f'Context hidden size   = {CONTEXT_HIDDEN_SIZE}')
+    log.info(logfile, f'Use large data        = {large_data}')
+    log.info(logfile, f'Use context attention = {use_context_attention}')
 
     # prepare data
     train_paragraphs, validation_paragraphs, test_paragraphs = [], [], []
@@ -143,8 +150,9 @@ def main(argv):
 
     print('Creating HRED')
     hred = Hred(DEVICE, book, 
-            MAX_LENGTH, HIDDEN_SIZE, CONTEXT_HIDDEN_SIZE, 
-            EMBEDDING_SIZE, optimizer_type
+            MAX_LENGTH, MAX_CONTEXT, HIDDEN_SIZE, CONTEXT_HIDDEN_SIZE, 
+            EMBEDDING_SIZE, optimizer_type,
+            use_context_attention=use_context_attention
     )
 
     print(f'Training for {epoch_size} epochs')
