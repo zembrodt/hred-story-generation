@@ -46,7 +46,7 @@ class DecoderRNN(nn.Module):
         # Context attentions
         self.use_context_attention = use_context_attention
         self.context_attn = nn.Linear(self.context_hidden_size, self.max_context)
-        self.context_attn_combine = nn.Linear(self.context_hidden_size * 2, self.embedding_size)
+        self.context_attn_combine = nn.Linear(self.context_hidden_size * 2, self.context_hidden_size)
 
         self.hidden_transform = nn.Linear(self.context_hidden_size, self.hidden_size)
 
