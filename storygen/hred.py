@@ -237,24 +237,23 @@ class Hred(object):
         torch.save(checkpoint_state, checkpoint_file)
         
     def _train(self, input_variable, target_variable,
-            encoder_model, decoder_model, context_model,
             context_hidden, context_outputs,
             encoder_optimizer, decoder_optimizer, 
-            criterion, last):
+            criterion, validation, last):
         
-        encoder_hidden = encoder_model.initHidden(self.device)
+        encoder_hidden = self.encoder.initHidden(self.device)
 
         input_length = input_variable.size()[0]
         target_length = target_variable.size()[0]
 
-        encoder_outputs = torch.zeros(self.max_length, encoder_model.hidden_size, device=self.device)
+        encoder_outputs = torch.zeros(self.max_length, self.encoder.hidden_size, device=self.device)
 
         loss = 0
 
         # Encode the input sentence
         for ei in range(input_length):
             if ei < self.max_length:
-                encoder_output, encoder_hidden = encoder_model(input_variable[ei], encoder_hidden)
+                encoder_output, encoder_hidden = self.encoder(input_variable[ei], encoder_hidden)
                 encoder_outputs[ei] = encoder_output[0][0]
             else:
                 print(f'Somehow we got ei={ei} for range({input_length}) where max_length={self.max_length}')
@@ -264,7 +263,7 @@ class Hred(object):
         # The "sentence vector" is the hidden state obtained after the last token of the sentence has been processed
         # encoder_hidden = sentence_vector
         # The Context RNN keeps track of past sentences by processing iteratively each sentence vector
-        context_output, context_hidden = context_model(encoder_hidden, context_hidden)
+        context_output, context_hidden = self.context(encoder_hidden, context_hidden)
         # After processing sentence S_n, the hidden state of the context RNN represents a summary of the sentences up to and
             # including sentence n, which is used to predict the next sentence S_n+1
         # This hidden state can be interpreted as the continuous-valued state of the dialogue system
@@ -284,7 +283,7 @@ class Hred(object):
         if use_teacher_forcing:
             # Teacher forcing: Feed the target as the next input
             for di in range(target_length):
-                decoder_output, decoder_hidden, decoder_attention = decoder_model(
+                decoder_output, decoder_hidden, decoder_attention = self.decoder(
                         decoder_input, decoder_hidden, encoder_outputs, context_hidden, context_outputs)
                 
                 if last:
@@ -296,7 +295,7 @@ class Hred(object):
         else:
             # Without teacher forcing: use its own predictions as the next input
             for di in range(target_length):
-                decoder_output, decoder_hidden, decoder_attention = decoder_model(
+                decoder_output, decoder_hidden, decoder_attention = self.decoder(
                     decoder_input, decoder_hidden, encoder_outputs, context_hidden, context_outputs)
                 topv, topi = decoder_output.topk(1)
 
@@ -320,10 +319,9 @@ class Hred(object):
             return context_hidden
 
     def _train_paragraph(self, paragraph,
-            encoder_model, decoder_model, context_model,
             context_hidden, 
             encoder_optimizer, decoder_optimizer, context_optimizer,
-            criterion):
+            criterion, validation):
         
         tensors = tensorsFromParagraph(self.book, paragraph, self.device)
 
@@ -340,8 +338,9 @@ class Hred(object):
             if i+1 == len(tensors)-1:
                 last = True
             if last:
-                loss, context_hidden = self._train(input_variable, target_variable, encoder_model, decoder_model, context_model,
-                        context_hidden, context_outputs, encoder_optimizer, decoder_optimizer, criterion, last)
+                loss, context_hidden = self._train(input_variable, target_variable,
+                        context_hidden, context_outputs, encoder_optimizer, decoder_optimizer, criterion,
+                        validation, last)
 
                 encoder_optimizer.step()
                 decoder_optimizer.step()
@@ -349,8 +348,9 @@ class Hred(object):
 
                 return loss, context_hidden
             else:
-                context_hidden = self._train(input_variable, target_variable, encoder_model, decoder_model, context_model,
-                        context_hidden, context_outputs, encoder_optimizer, decoder_optimizer, criterion, last)
+                context_hidden = self._train(input_variable, target_variable,
+                        context_hidden, context_outputs, encoder_optimizer, decoder_optimizer, criterion,
+                        validation, last)
             context_outputs[i] = context_hidden
         print('We reached a part of training that should be unreachable! Empty paragraph perhaps?')
         print(f'Paragraph: {paragraph}')
@@ -543,8 +543,8 @@ class Hred(object):
                 iter += 1
 
                 loss, self.context_hidden = self._train_paragraph(train_paragraph,
-                    self.encoder, self.decoder, self.context,
-                    self.context_hidden, self.encoder_optimizer, self.decoder_optimizer, self.context_optimizer, criterion)
+                    self.context_hidden, self.encoder_optimizer, self.decoder_optimizer, self.context_optimizer,
+                    criterion, False)
 
                 loss_avg += loss
                 print_loss_total += loss
@@ -575,19 +575,18 @@ class Hred(object):
                 validation_loss_avg = 0
                 for j, validation_paragraph in enumerate(validation_paragraphs):
                     # Create copies
-                    encoder_optimizer_copy = copy.deepcopy(self.encoder_optimizer)
-                    decoder_optimizer_copy = copy.deepcopy(self.decoder_optimizer)
-                    context_optimizer_copy = copy.deepcopy(self.context_optimizer)
-                    encoder_copy = copy.deepcopy(self.encoder)
-                    decoder_copy = copy.deepcopy(self.decoder)
-                    context_copy = copy.deepcopy(self.context)
-                    context_hidden_copy = copy.deepcopy(self.context_hidden)
-                    criterion_copy = copy.deepcopy(criterion)
+                    #encoder_optimizer_copy = copy.deepcopy(self.encoder_optimizer)
+                    #decoder_optimizer_copy = copy.deepcopy(self.decoder_optimizer)
+                    #context_optimizer_copy = copy.deepcopy(self.context_optimizer)
+                    #encoder_copy = copy.deepcopy(self.encoder)
+                    #decoder_copy = copy.deepcopy(self.decoder)
+                    #context_copy = copy.deepcopy(self.context)
+                    #context_hidden_copy = copy.deepcopy(self.context_hidden)
+                    #criterion_copy = copy.deepcopy(criterion)
                     
                     loss, _ = self._train_paragraph(validation_paragraph,
-                            encoder_copy, decoder_copy, context_copy,
-                            context_hidden_copy, encoder_optimizer_copy, decoder_optimizer_copy, context_optimizer_copy, 
-                            criterion_copy)
+                            context_hidden, encoder_optimizer, decoder_optimizer, context_optimizer, 
+                            criterion, True)
                     validation_loss_avg += loss
                 # Save validation loss value
                 validation_loss_avg /= float(len(validation_paragraphs))
