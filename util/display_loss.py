@@ -1,7 +1,8 @@
 # display_loss.py
 
 # Displays the loss values of select word embeddings as a graph, with or without validation values
-
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import getopt
 import sys
@@ -12,13 +13,16 @@ VALIDATION = 'validation'
 TYPES = ['none', 'glove', 'sg', 'cbow']
 
 def main(argv):
-    opts, _ = getopt.getopt(argv, 'hvnscg', ['help', 'validation']+TYPES)
+    opts, _ = getopt.getopt(argv, 'hvnscg', ['help', 'validation', 'every=']+TYPES)
     display_validation = False
+    plot_every = 0
     # Check if any non-validation options were selected
     types_selected = []
-    for opt, _ in opts:
+    for opt, arg in opts:
         if opt in ('-v', '--validation'):
             display_validation = True
+        elif opt == '--every':
+            plot_every = int(arg)
         elif opt in ('-h', '--help'):
             print('display_loss.py')
             print('Any combination of parameters may be used.If none are selected, all embedding types are added\nUsage:')
@@ -39,11 +43,15 @@ def main(argv):
         if len(types_selected) == 0 or t in types_selected:
             with open(FILE_FORMAT.format(LOSS, t), 'r') as f:
                 loss_values = [item.split(',') for item in f.read().strip().split('\t')]
+                if plot_every > 0:
+                    loss_values = [item for item in loss_values if int(item[0]) % plot_every == 0]
                 label = '{} training'.format(t)
                 plt.plot([int(item[0]) for item in loss_values], [float(item[1]) for item in loss_values], label=label)
             if display_validation:
                 with open(FILE_FORMAT.format(VALIDATION, t), 'r') as f:
                     validation_values = [item.split(',') for item in f.read().strip().split('\t')]
+                    if plot_every > 0:
+                        validation_values = [item for item in validation_values if int(item[0]) % plot_every == 0]
                     label = '{} validation'.format(t)
                     plt.plot([int(item[0]) for item in validation_values], [float(item[1]) for item in validation_values], label=label)
             plt.legend()
