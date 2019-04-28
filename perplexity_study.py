@@ -84,7 +84,7 @@ def main(argv):
     # Get command line arguments
     try:
         #opts, _ = getopt.getopt(argv, 'hf:', ['embedding=', 'build=', 'help', 'file='])
-        opts, _ = getopt.getopt(argv, 'hf:', ['help', 'file='])
+        opts, _ = getopt.getopt(argv, 'hf:', ['help', 'file=', 'largedata'])
     except getopt.GetoptError as e:
         print(e)
         print(HELP_MSG)
@@ -97,14 +97,17 @@ def main(argv):
     # Default value
     embedding_type = None
     checkpoint_filename = None
+    large_data = False
 
     # Set values from command line
     for opt, arg in opts:
         if opt in ('-h', '--help'):
             print(HELP_MSG)
             exit()
-        if opt in ('-f', '--file'):
+        elif opt in ('-f', '--file'):
             checkpoint_filename = arg
+        elif opt == '--largedata':
+            large_data = True
         # TODO: Re-implement?
         '''
         elif opt == '--embedding':
@@ -147,14 +150,24 @@ def main(argv):
     else:
         obj_dir += '/'
 
+    logger.info(logfile, f'Using large dataset: {large_data}')
+
     # prepare data
     train_paragraphs, validation_paragraphs, test_paragraphs = [], [], []
-    with open('data/train_raw.pkl', 'rb') as f:
-        train_paragraphs = pickle.load(f)
-    with open('data/validate_raw.pkl', 'rb') as f:
-        validation_paragraphs = pickle.load(f)
-    with open('data/test_raw.pkl', 'rb') as f:
-        test_paragraphs = pickle.load(f)
+    if large_data:
+        with open('data/train_raw_4.pkl', 'rb') as f:
+            train_paragraphs = pickle.load(f)
+        with open('data/validate_raw_4.pkl', 'rb') as f:
+            validation_paragraphs = pickle.load(f)
+        with open('data/test_raw_4.pkl', 'rb') as f:
+            test_paragraphs = pickle.load(f)
+    else:
+        with open('data/train_raw.pkl', 'rb') as f:
+            train_paragraphs = pickle.load(f)
+        with open('data/validate_raw.pkl', 'rb') as f:
+            validation_paragraphs = pickle.load(f)
+        with open('data/test_raw.pkl', 'rb') as f:
+            test_paragraphs = pickle.load(f)
 
     paragraphs = train_paragraphs + validation_paragraphs + test_paragraphs
 
