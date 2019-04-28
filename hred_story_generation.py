@@ -46,7 +46,8 @@ def main(argv):
 
     # Get command line arguments
     try:
-        opts, _ = getopt.getopt(argv, 'h', ['epoch=', 'embedding=', 'optim=', 'optimizer=', 'loss=', 'largedata', 'ca', 'help'])
+        opts, _ = getopt.getopt(argv, 'h', 
+            ['epoch=', 'embedding=', 'optim=', 'optimizer=', 'loss=', 'largedata', 'ca', 'help', 'cdir='])
     except getopt.GetoptError as e:
         print(e)
         print(HELP_MSG)
@@ -59,6 +60,7 @@ def main(argv):
     loss_dir = None
     large_data = False
     use_context_attention = False
+    checkpoint_dir = None
 
     # Set values from command line
     for opt, arg in opts:
@@ -88,8 +90,12 @@ def main(argv):
         # Use the large set of data (4 books instead of 1)
         elif opt == '--largedata':
             large_data = True
+        # Use context attention
         elif opt == '--ca':
             use_context_attention = True
+        # Manually set the checkpoint directory
+        elif opt == '--cdir':
+            checkpoint_dir = arg
 
     print('Epoch size            = {}'.format(epoch_size))
     print('Embedding type        = {}'.format(embedding_type))
@@ -99,6 +105,8 @@ def main(argv):
     print('Context hidden size   = {}'.format(CONTEXT_HIDDEN_SIZE))
     print('Use large data        = {}'.format(large_data))
     print('Use context attention = {}'.format(use_context_attention))
+    if checkpoint_dir is not None:
+        print(f'Checkpoint dir        = {checkpoint_dir}')
     print(f'Log dir               = {log.dir}')
 
     log.info(logfile, f'Epoch size            = {epoch_size}')
@@ -109,6 +117,8 @@ def main(argv):
     log.info(logfile, f'Context hidden size   = {CONTEXT_HIDDEN_SIZE}')
     log.info(logfile, f'Use large data        = {large_data}')
     log.info(logfile, f'Use context attention = {use_context_attention}')
+    if checkpoint_dir is not None:
+        log.info(logfile, f'Checkpoint dir        = {checkpoint_dir}')
 
     # prepare data
     train_paragraphs, validation_paragraphs, test_paragraphs = [], [], []
@@ -152,7 +162,8 @@ def main(argv):
     hred = Hred(DEVICE, book, 
             MAX_LENGTH, MAX_CONTEXT, HIDDEN_SIZE, CONTEXT_HIDDEN_SIZE, 
             EMBEDDING_SIZE, optimizer_type,
-            use_context_attention=use_context_attention
+            use_context_attention=use_context_attention,
+            checkpoint_dir=checkpoint_dir
     )
 
     print(f'Training for {epoch_size} epochs')

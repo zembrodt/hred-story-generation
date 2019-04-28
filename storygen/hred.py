@@ -120,6 +120,10 @@ class BeamSearchResult:
 # Represents a Hierarchical Recurrent Encoder-Decoder that's made up of
 # a sentence-encoder RNN, context-encoder RNN, and a decoder RNN with 
 # attention weights
+
+# check https://discuss.pytorch.org/t/getting-the-validation-loss-while-training/36245
+# https://discuss.pytorch.org/t/is-my-implementation-of-calculating-training-and-validation-loss-correct-after-each-iteration-they-are-nearly-same/26793
+
 class Hred(object):
     def __init__(self, device, book, max_length, max_context, hidden_size, context_hidden_size, embedding_size, 
             optimizer_type='adam',
@@ -130,6 +134,7 @@ class Hred(object):
             attention_layers = 1,
             decoder_layers = 1,
             learning_rate = 0.0001,
+            checkpoint_dir = None
             ):
         # Original parameters
         self.book = book
@@ -147,6 +152,8 @@ class Hred(object):
         self.use_context_attention = use_context_attention
 
         self.device = device
+
+        self.checkpoint_dir = checkpoint_dir
 
         # New parameters
         self.teacher_forcing_ratio = teacher_forcing_ratio
@@ -367,7 +374,9 @@ class Hred(object):
         # TODO: re-add checkpoints and embeddings
         
         # Set folder for checkpoints
-        if embedding_type is not None:
+        if self.checkpoint_dir is not None:
+            CHECKPOINT_DIR = self.checkpoint_dir
+        elif embedding_type is not None:
             if embedding_type == 'glove':
                 CHECKPOINT_DIR = 'obj_glove'
             elif embedding_type == 'sg':
@@ -377,6 +386,9 @@ class Hred(object):
             else:
                 print('Incorrect embedding type given! Please choose one of ["glove", "sg", "cbow"]')
                 exit()
+
+        # Create the checkpoint directory if it does not exist
+        os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
         self.log.info(logfile, 'Training for {} epochs'.format(epochs))
         self.log.info(logfile, 'Embedding type: {}'.format(embedding_type))
